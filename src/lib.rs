@@ -40,7 +40,7 @@ pub mod signature;
 #[cfg(feature = "snark")]
 pub mod snark;
 
-#[cfg(feature = "sponge")]
+// #[cfg(feature = "sponge")]
 pub mod sponge;
 
 pub type Error = Box<dyn ark_std::error::Error>;
