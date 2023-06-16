@@ -49,7 +49,6 @@ impl Sha2Bridge {
 
 impl Sponge for Sha2Bridge {
     type L = u8;
-    type State = [u8; Self::DIGEST_SIZE];
 
     fn new() -> Self {
         let mut hasher = sha2::Sha256::new();
@@ -62,8 +61,12 @@ impl Sponge for Sha2Bridge {
         }
     }
 
-    fn state(&self) -> Self::State {
-        self.cv
+    fn from_capacity(input: &[Self::L]) -> Self {
+        let mut sha2bridge = Self::new();
+        sha2bridge.hasher.update(&Self::MASK_SQUEEZE[..]);
+        sha2bridge.hasher.update(&(0usize).to_be_bytes());
+        sha2bridge.hasher.update(&input);
+        sha2bridge
     }
 
     fn absorb_unsafe(&mut self, input: &[Self::L]) -> &mut Self {
@@ -124,7 +127,7 @@ impl Sponge for Sha2Bridge {
     }
 
     fn finish(self) {
-        // Nothing to do
+        todo!()
     }
 }
 
@@ -134,14 +137,14 @@ impl SpongeExt for Sha2Bridge {
     }
 
     fn ratchet_unsafe(&mut self) -> &mut Self {
-        match self.mode {
-            Mode::Absorb => self.cv.copy_from_slice(&self.hasher.finalize_reset()[..]),
-            _ => (),
+        if self.mode == Mode::Absorb {
+            let digest = self.hasher.finalize_reset();
+            self.cv.copy_from_slice(&digest)
         }
         self
     }
 
     fn export_unsafe(&self) -> Vec<u8> {
-        self.state().to_vec()
+        self.cv.to_vec()
     }
 }

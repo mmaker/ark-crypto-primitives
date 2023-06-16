@@ -1,9 +1,6 @@
-use crate::sponge::poseidon::PoseidonSponge;
-use crate::sponge::CryptographicSponge;
 use ark_bls12_377::Fq;
 use ark_ff::{BigInteger, PrimeField};
 
-use crate::sponge::{poseidon::PoseidonConfig};
 use crate::fs::{Lane, Sponge, SpongeExt};
 use ark_std::Zero;
 
@@ -20,64 +17,79 @@ impl Lane for Fq {
     }
 }
 
-fn poseidon_test_config<F: PrimeField>() -> PoseidonConfig<F> {
-    use crate::sponge::poseidon::find_poseidon_ark_and_mds;
-    let full_rounds = 8;
-    let partial_rounds = 31;
-    let alpha = 5;
-    let rate = 2;
+pub trait SpongeConfig {
+    // the lane requirement here is not really needed
+    type L: Lane;
 
-    let (ark, mds) = find_poseidon_ark_and_mds::<F>(
-        F::MODULUS_BIT_SIZE as u64,
-        rate,
-        full_rounds,
-        partial_rounds,
-        0,
-    );
-
-    PoseidonConfig::new(
-        full_rounds as usize,
-        partial_rounds as usize,
-        alpha,
-        mds,
-        ark,
-        rate,
-        1,
-    )
+    fn new() -> Self;
+    fn capacity(&self) -> usize;
+    fn rate(&self) -> usize;
+    fn permute(&mut self, state: &mut [Self::L]);
 }
 
-/// XXX. check that we are correcly giving out rate and capacity
-impl Sponge for PoseidonSponge<Fq> {
-    type L = Fq;
-    // state length should be 3?
-    type State = [Fq; 3];
+pub struct DuplexSponge<C: SpongeConfig> {
+    config: C,
+    state: Vec<C::L>,
+    absorb_pos: usize,
+    squeeze_pos: usize,
+}
+
+impl<L: Lane, C: SpongeConfig<L=L>> Sponge for DuplexSponge<C> {
+    type L = L;
 
     fn new() -> Self {
-        let params = poseidon_test_config::<Fq>();
-        <Self as CryptographicSponge>::new(&params)
+        let config = C::new();
+        let state = vec![Self::L::default(); config.capacity() + config.rate()];
+        Self {config, state, absorb_pos: 0, squeeze_pos: 0 }
     }
+
     fn absorb_unsafe(&mut self, input: &[Self::L]) -> &mut Self {
-        self.absorb(&input);
-        self
+        if input.len() == 0 {
+            self.squeeze_pos = self.config.rate();
+            self
+        } else if self.absorb_pos == self.config.rate() {
+            self.config.permute(&mut self.state);
+            self.absorb_pos = 0;
+            self
+        } else {
+            // XXX. absorbing in overwrite mode
+            self.state[self.absorb_pos] = input[0];
+            self.absorb_pos += 1;
+            self.absorb_unsafe(&input[1..])
+        }
     }
 
     fn squeeze_unsafe(&mut self, output: &mut [Self::L]) -> &mut Self {
-        let num_elements = output.len();
-        let buf = <Self as CryptographicSponge>::squeeze_field_elements(self, num_elements);
-        output.copy_from_slice(&buf);
-        self
+        if output.len() == 0 {
+            return self;
+        }
+
+        if self.squeeze_pos == self.config.rate() {
+                self.squeeze_pos = 0;
+                self.absorb_pos = 0;
+                self.config.permute(&mut self.state);
+        }
+
+        output[0] = self.state[self.squeeze_pos];
+        self.squeeze_pos += 1;
+        self.squeeze_unsafe(&mut output[1..])
     }
 
     fn finish(self) {
-        // TODO: zeroize
+        // zeroize::Zeroize::zeroize(&mut self.state);
+        todo!()
     }
 
-    fn state(&self) -> Self::State {
-        self.state.clone().try_into().unwrap()
+    fn from_capacity(input: &[Self::L]) -> Self {
+        let mut sponge = Self::new();
+        assert_eq!(input.len(), sponge.config.capacity());
+        sponge.state[sponge.config.rate()..].copy_from_slice(input);
+        sponge
     }
+
 }
 
-impl SpongeExt for PoseidonSponge<Fq> {
+impl<F: Lane + PrimeField, C: SpongeConfig<L=F>> SpongeExt for DuplexSponge<C> {
     fn squeeze_bytes_unsafe(&mut self, output: &mut [u8]) {
         // obtained with the above function
         let n = 251 / 8;
@@ -93,15 +105,16 @@ impl SpongeExt for PoseidonSponge<Fq> {
     }
 
     fn export_unsafe(&self) -> Vec<Self::L> {
-        self.state()[.. 1].to_vec()
+        // XXX. double-check this
+        self.state.to_vec()
     }
 
     fn ratchet_unsafe(&mut self) -> &mut Self {
-        let digest = self.squeeze_field_elements(self.parameters.capacity);
-        self.state[self.parameters.rate..].copy_from_slice(&digest);
-        self.state[..self.parameters.rate]
+        self.config.permute(self.state.as_mut_slice());
+        // set to zero the state up to rate
+        self.state[..self.config.rate()]
             .iter_mut()
-            .for_each(|x| *x = Fq::zero());
+            .for_each(|x| *x = F::zero());
         self
     }
 }

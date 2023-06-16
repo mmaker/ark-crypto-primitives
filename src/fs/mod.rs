@@ -4,13 +4,14 @@
 //! This library is a secure construction for zero-knowledge proofs based on SAFE.
 //! It enables secure provision of randomness for the prover and secure generation
 //! of random coins for the verifier.
-//! This allows the implementation of non-interactive protocols in a readable manner.
+//! This allows for the implementation of non-interactive protocols in a readable manner.
 //!
 //! ```rust
 //! use ark_crypto_primitives::fs::legacy::Sha2Bridge;
 //! use ark_crypto_primitives::fs::ext::{FieldChallenges, AbsorbSerializable};
 //! use ark_crypto_primitives::fs::{Merlin, InvalidTag};
 //! use ark_crypto_primitives::sponge::poseidon::PoseidonSponge;
+//! use ark_crypto_primitives::fs::poseidon_ng::PoseidonSpongeNG;
 //! use rand::rngs::OsRng;
 //! use rand::RngCore;
 //! use ark_bls12_377::{Fr, Fq};
@@ -18,22 +19,22 @@
 //! use ark_ec::{AffineRepr, CurveGroup, Group};
 //! use ark_std::UniformRand;
 //!
-//! fn schnorr_proof(transcript: &mut Transcript, sk: Fr, pk: G1) -> Result<(Fr, Fr), InvalidTag> {
+//! fn schnorr_proof(sk: Fr, pk: G1) -> Result<(Fr, Fr), InvalidTag> {
 //!     // create a new verifier transcript for the protocol identified by the tag.
 //!     // the tag string indicates that:
 //!     // - the statement will absorb 48 * 2 elements
 //!     // - the protocol will: absorb two elements, squeeze 16 bytes.
 //!     // utilities for creating tag strings automatically will be added in the future.
-//!     let mut merlin = Merlin::<PoseidonSponge<Fq>>::new("example.com A48A48,A2S16")?;
+//!     let mut merlin = Merlin::<PoseidonSpongeNG<Fq>>::new("example.com A48A48,A2S16")?;
 //!     // Absorb the statement.
 //!     merlin.absorb_serializable(pk)?
 //!           .absorb_serializable(G1::generator())?
 //!           .ratchet()?;
 //!     // At this point the state can be cloned, or exported
-//!     // so that the proof cna be verified inside another sponge.
-//!    // let mut verifier_state = merlin.clone();
+//!     // so that the proof can be verified inside another sponge.
+//!     // let mut verifier_state = merlin.clone();
 //!
-//!     // Build a rng that is tied to the protocol transcript.
+//!     // Build an RNG that is tied to the protocol transcript.
 //!     // Using a fast sponge, rekeying it with some witness data,
 //!     // and seeding it with a cryptographically-secure random number generator.
 //!     let mut transcript = merlin.into_transcript::<Sha2Bridge>()
@@ -44,11 +45,11 @@
 //!     let k = Fr::rand(&mut transcript.rng());
 //!     let K = G1::generator().into_affine() * k;
 //!     // Absorptions can be streamed:
-//!     // transcript.absorb(&[K.x, K.y])?; transcript.absorb(&[K.y])?;
+//!     // transcript.absorb(&[K.x])?; transcript.absorb(&[K.y])?;
 //!     transcript.absorb(&[K.x, K.y])?;
 //!
 //!     // Get a challenge from the verifier.
-//!     let challenge = transcript.get_field_challenge::<Fr>()?;
+//!     let challenge = transcript.get_field_challenge::<Fr>(16)?;
 //!     // At any point, the prover can get a csrng from the transcript.
 //!     let response = k + challenge * sk;
 //!     let proof = (challenge, response);
@@ -67,21 +68,17 @@
 //! Like Merlin, it supports multi-round protocols and domain separation.
 //! Additionally, it addresses some core design limitations of [Merlin]:
 //! - Supports algebraic hashes.
-//!
 //! To build a secure Fiat-Shamir transform, a permutation function is required.
 //! You can choose from SHA3, Poseidon, Anemoi, instantiated over
 //! $\mathbb{F}_{2^8}$ or any large-characteristic field $\mathbb{F}_p$.
 //! - Provides retro-compatibility with Sha2 and MD hashes.
-//!
 //! We have a legacy interface for Sha2 that can be easily extended to Merkle-Damgard hashes
 //! and any hash function that satisfies the [`digest::Digest`] trait.
 //! - Provides an API for preprocessing.
-//!
 //! In recursive SNARKs, minimizing the number of invocations of the permutation
 //! while maintaining security is crucial. We offer tools for preprocessing the Transcript (i.e., the state of the Fiat-Shamir transform) to achieve this.
 //!
 //! - Enables secure randomness generation for the prover.
-//!
 //! We provide a secure source of randomness for the prover that is bound to the protocol transcript, and seeded by the oeprating system.
 //!
 //! # Protocol Composition
@@ -102,11 +99,10 @@
 //! This serves as a security feature, preventing the prover from unexpectedly
 //! branching without following a specific protocol.
 //!
-//! # Questions
+//! # Questions during calls
 //!
 //! 1. Can you name a proof system (_actual, legit implementations_)
 //!    that uses challenges in the same domain it absorbs?
-//!
 //!    For cryptographic sponges absorbing bytes, this is clearly not the case.
 //!    For algebraic hashes, I think this is not the case either:
 //!    all protocols I know of absorb elements over the coordinate space, and for efficiency reasons
@@ -154,6 +150,9 @@ pub mod legacy;
 /// Support for sponge functions.
 pub mod sponge;
 
+/// New implementation of the poseidon sponge function.
+pub mod poseidon_ng;
+
 use arthur::Arthur;
 
 /// A Lane is the basic unit a sponge function works on.
@@ -169,10 +168,6 @@ pub trait Sponge {
     /// Must support packing and unpacking to bytes.
     type L: Lane;
 
-    /// The type of the compressed sponge state.
-    /// Useful for preprocessing and exporting.
-    type State;
-
     /// Initializes a new sponge, setting up the state.
     fn new() -> Self;
     /// Absorbs new elements in the sponge.
@@ -180,7 +175,7 @@ pub trait Sponge {
     /// Squeezes out new elements.
     fn squeeze_unsafe(&mut self, output: &mut [Self::L]) -> &mut Self;
     /// Provides access to the internal state of the sponge.
-    fn state(&self) -> Self::State;
+    fn from_capacity(input: &[Self::L]) -> Self;
     /// Securely destroys the sponge and its internal state.
     fn finish(self);
 }
@@ -191,6 +186,25 @@ pub trait Sponge {
 /// this operation is non-trivial for algebraic hashes: there is no guarantee that the output
 /// $\pmod p$ is uniformly distributed over $2^{\lfloor log p\rfloor}$.
 pub trait SpongeExt: Sponge {
+    /// While this function is trivial for byte-oriented hashes,
+    /// for algebraic hashes, it requires proper implementation.
+    /// Many implementations simply truncate the least-significant bits, but this approach
+    /// results in a statistical deviation from uniform randomness. The number of useful bits, denoted as `n`,
+    /// has a statistical distance from uniformly random given by:
+    ///
+    /// ```text
+    /// (2 * (p % 2^n) / 2^n) * (1 - (p % 2^n) / p)
+    /// ```
+    ///
+    /// To determine the value of 'n' suitable for cryptographic operations, use the following function:
+    ///
+    /// ```python
+    /// def useful_bits(p):
+    ///     for n in range(p.bit_length()-1, 0, -1):
+    ///         alpha = p % 2^n
+    ///         if n+1 + p.bit_length() - alpha.bit_length() - (2^n-alpha).bit_length() >= 128:
+    ///             return n
+    /// ```
     fn squeeze_bytes_unsafe(&mut self, output: &mut [u8]);
     fn export_unsafe(&self) -> Vec<Self::L>;
     fn ratchet_unsafe(&mut self) -> &mut Self;
@@ -340,6 +354,7 @@ impl<S: SpongeExt> Safe<S> {
     }
 
     /// Perform secure absorption of the elements in `input`.
+    /// Absorb calls can be batched together, or provided separately for streaming-friendly protocols.
     pub fn absorb(&mut self, input: &[S::L]) -> Result<&mut Self, InvalidTag> {
         let op = self.stack.pop_front().unwrap();
         if let Op::Absorb(length) = op {
@@ -365,24 +380,8 @@ impl<S: SpongeExt> Safe<S> {
     /// Perform a secure squeeze operation, filling the output buffer with uniformly random bytes.
     ///
     /// For byte-oriented sponges, this operation is equivalent to the squeeze operation.
-    /// However, for algebraic hashes, it requires proper implementation.
-    /// Many implementations simply truncate the least-significant bits, but this approach
-    /// results in a statistical deviation from uniform randomness. The number of useful bits, denoted as `n`,
-    /// has a statistical distance from uniformly random given by:
-    ///
-    /// ```text
-    /// (2 * (p % 2^n) / 2^n) * (1 - (p % 2^n) / p)
-    /// ```
-    ///
-    /// To determine the value of 'n' suitable for cryptographic operations, use the following function:
-    ///
-    /// ```python
-    /// def useful_bits(p):
-    ///     for n in range(p.bit_length()-1, 0, -1):
-    ///         alpha = p % 2^n
-    ///         if n+1 + p.bit_length() - alpha.bit_length() - (2^n-alpha).bit_length() >= 128:
-    ///             return n
-    /// ```
+    /// However, for algebraic hashes, this operation is non-trivial.
+    /// This function provides no guarantee of streaming-friendliness.
     pub fn squeeze(&mut self, output: &mut [u8]) -> Result<(), InvalidTag> {
         let op = self.stack.pop_front().unwrap();
         if let Op::Squeeze(length) = op {
@@ -420,7 +419,6 @@ pub struct TranscriptBuilder<S: SpongeExt, FS: SpongeExt<L = u8>> {
 }
 
 impl<S: SpongeExt, FS: SpongeExt<L = u8>> TranscriptBuilder<S, FS> {
-
     pub(crate) fn new(mut fsponge: FS, merlin: Merlin<S>) -> Self {
         let merlin_state = merlin.0.sponge.export_unsafe();
         let encoded_state = &<S as Sponge>::L::to_bytes(&merlin_state);

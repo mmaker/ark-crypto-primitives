@@ -60,7 +60,7 @@ pub struct PoseidonSponge<F: PrimeField> {
 }
 
 impl<F: PrimeField> PoseidonSponge<F> {
-    fn apply_s_box(&self, state: &mut [F], is_full_round: bool) {
+    pub(crate) fn apply_s_box(&self, state: &mut [F], is_full_round: bool) {
         // Full rounds apply the S Box (x^alpha) to every element of state
         if is_full_round {
             for elem in state {
@@ -73,13 +73,13 @@ impl<F: PrimeField> PoseidonSponge<F> {
         }
     }
 
-    fn apply_ark(&self, state: &mut [F], round_number: usize) {
+    pub(crate) fn apply_ark(&self, state: &mut [F], round_number: usize) {
         for (i, state_elem) in state.iter_mut().enumerate() {
             state_elem.add_assign(&self.parameters.ark[round_number][i]);
         }
     }
 
-    fn apply_mds(&self, state: &mut [F]) {
+    pub(crate) fn apply_mds(&self, state: &mut [F]) {
         let mut new_state = Vec::new();
         for i in 0..state.len() {
             let mut cur = F::zero();
@@ -92,7 +92,7 @@ impl<F: PrimeField> PoseidonSponge<F> {
         state.clone_from_slice(&new_state[..state.len()])
     }
 
-    fn permute(&mut self) {
+    pub(crate) fn permute(&mut self) {
         let full_rounds_over_2 = self.parameters.full_rounds / 2;
         let mut state = self.state.clone();
         for i in 0..full_rounds_over_2 {
