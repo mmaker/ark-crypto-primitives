@@ -43,6 +43,9 @@ pub mod snark;
 // #[cfg(feature = "sponge")]
 pub mod sponge;
 
+/// Fiat-Shamir for public-coin arguments.
+pub mod fs;
+
 pub type Error = Box<dyn ark_std::error::Error>;
 
 #[derive(Debug)]

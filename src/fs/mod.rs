@@ -7,35 +7,46 @@
 //! This allows the implementation of non-interactive protocols in a readable manner.
 //!
 //! ```rust
-//! use ark_crypto_primitives::sponge::fs::legacy::Sha2Bridge;
-//! use ark_crypto_primitives::sponge::fs::ext::{FieldChallenges, AbsorbSerializable};
-//! use ark_crypto_primitives::sponge::fs::{Merlin, TagError};
+//! use ark_crypto_primitives::fs::legacy::Sha2Bridge;
+//! use ark_crypto_primitives::fs::ext::{FieldChallenges, AbsorbSerializable};
+//! use ark_crypto_primitives::fs::{Merlin, InvalidTag};
+//! use ark_crypto_primitives::sponge::poseidon::PoseidonSponge;
 //! use rand::rngs::OsRng;
 //! use rand::RngCore;
 //! use ark_bls12_377::{Fr, Fq};
 //! use ark_bls12_377::G1Projective as G1;
 //! use ark_ec::{AffineRepr, CurveGroup, Group};
 //! use ark_std::UniformRand;
-//! use ark_crypto_primitives::sponge::poseidon::PoseidonSponge;
 //!
-//! fn schnorr_proof(sk: Fr, pk: G1) -> Result<(Fr, Fr), TagError> {
+//! fn schnorr_proof(transcript: &mut Transcript, sk: Fr, pk: G1) -> Result<(Fr, Fr), InvalidTag> {
 //!     // create a new verifier transcript for the protocol identified by the tag.
-//!     let merlin = Merlin::<PoseidonSponge<Fq>>::new("example.com A48A48,A2S16")?;
-//!     // Build on the top a prover state, using another sponge, rekeying it with some witness data,
-//!     // and finalizing it with a cryptographically-secure random number generator.
+//!     // the tag string indicates that:
+//!     // - the statement will absorb 48 * 2 elements
+//!     // - the protocol will: absorb two elements, squeeze 16 bytes.
+//!     // utilities for creating tag strings automatically will be added in the future.
+//!     let mut merlin = Merlin::<PoseidonSponge<Fq>>::new("example.com A48A48,A2S16")?;
+//!     // Absorb the statement.
+//!     merlin.absorb_serializable(pk)?
+//!           .absorb_serializable(G1::generator())?
+//!           .ratchet()?;
+//!     // At this point the state can be cloned, or exported
+//!     // so that the proof cna be verified inside another sponge.
+//!    // let mut verifier_state = merlin.clone();
+//!
+//!     // Build a rng that is tied to the protocol transcript.
+//!     // Using a fast sponge, rekeying it with some witness data,
+//!     // and seeding it with a cryptographically-secure random number generator.
 //!     let mut transcript = merlin.into_transcript::<Sha2Bridge>()
 //!         .rekey(b"witness data")
 //!         .finalize_with_rng(OsRng);
 //!
-//!     // Absorb the statement.
-//!     transcript.absorb_serializable(pk)?;
-//!     transcript.absorb_serializable(G1::generator())?;
-//!     transcript.ratchet();
 //!     // Actual proof.
 //!     let k = Fr::rand(&mut transcript.rng());
 //!     let K = G1::generator().into_affine() * k;
-//!     // Absorptions can be chained together for streaming-frendliness.
+//!     // Absorptions can be streamed:
+//!     // transcript.absorb(&[K.x, K.y])?; transcript.absorb(&[K.y])?;
 //!     transcript.absorb(&[K.x, K.y])?;
+//!
 //!     // Get a challenge from the verifier.
 //!     let challenge = transcript.get_field_challenge::<Fr>()?;
 //!     // At any point, the prover can get a csrng from the transcript.
@@ -93,8 +104,8 @@
 //!
 //! # Questions
 //!
-//! 1. Can you name a system that _needs_ challenges in the same domain it absorbs?
-//!    I am talking about actual implementation.
+//! 1. Can you name a proof system (_actual, legit implementations_)
+//!    that uses challenges in the same domain it absorbs?
 //!
 //!    For cryptographic sponges absorbing bytes, this is clearly not the case.
 //!    For algebraic hashes, I think this is not the case either:
@@ -111,7 +122,22 @@
 //!    Functioning is easy: every time the public sponge squeezes, we absorb and reseed with
 //!    operating system randomness.
 //!    Absorptions are not needed (after all, they are deterministically derived from the sponge itself)
-//! 5. Ergonomics: do you see a way to avoid having `Result`s everywhere? Maybe with attributes?
+//! 5. Ergonomics: do you see a way to avoid having `Result`s everywhere?
+//!     Should we just panic at runtime?
+//! 6. Scoping: is this composability idea used anywhere?
+//!     One easy and secure way for composition is to squeeze `capacity` elements from the sponge
+//!     and provide them to the user upon finishing a transcript.
+//!     They can be used to re-seed a new sponge with a new stack.
+//!     Is this a good idea?
+//! 7. Forcing input of statements in the transcript:
+//!    The call to `ratchet` is currently what separates the statement from the rest of the protocol.
+//!    This is not so intuitive, and it would be nicer to have an API that explicits
+//!    where the statement is.
+//! 8. Easier protocol composition: there are two approaches. the latter seems more reasonable?
+//!     - upon finish, ratchet and return a seed.
+//!         This makes a wasteful call to the permutation function most of the time.
+//!     - statically chain the tags.
+//!         This requires a larger overhead on the side of the engineer.
 //!
 //! [Merlin]: https://github.com/dalek-cryptography/merlin
 //! [`digest::Digest`]: https://docs.rs/digest/latest/digest/trait.Digest.html
@@ -123,9 +149,10 @@ use ark_std::rand::{CryptoRng, RngCore};
 mod arthur;
 /// Extension for the public-coin transcripts.
 pub mod ext;
-
 /// Support for legacy hash functions (SHA2).
 pub mod legacy;
+/// Support for sponge functions.
+pub mod sponge;
 
 use arthur::Arthur;
 
@@ -137,33 +164,48 @@ pub trait Lane: Sized + Default + Copy {
 }
 
 /// A Sponge is a stateful object that can absorb and squeeze data.
-pub trait Sponge: Clone {
+pub trait Sponge {
+    /// The basic unit that the sponge works with.
+    /// Must support packing and unpacking to bytes.
     type L: Lane;
+
+    /// The type of the compressed sponge state.
+    /// Useful for preprocessing and exporting.
+    type State;
+
+    /// Initializes a new sponge, setting up the state.
     fn new() -> Self;
+    /// Absorbs new elements in the sponge.
     fn absorb_unsafe(&mut self, input: &[Self::L]) -> &mut Self;
+    /// Squeezes out new elements.
     fn squeeze_unsafe(&mut self, output: &mut [Self::L]) -> &mut Self;
-    fn ratchet_unsafe(&mut self) -> &mut Self;
+    /// Provides access to the internal state of the sponge.
+    fn state(&self) -> Self::State;
+    /// Securely destroys the sponge and its internal state.
     fn finish(self);
 }
 
-/// A [`crate::sponge::fs::Sponge8`] additionally provides a way to squeeze uniformly-random bytes.
-/// While this is natural for common cryptographic sponges,
+/// A [`crate::fs::SpongeExt`] additionally provides
+/// squeezing uniformly-random bytes and ratcheting.
+/// While squeezing bytes is natural for common cryptographic sponges,
 /// this operation is non-trivial for algebraic hashes: there is no guarantee that the output
 /// $\pmod p$ is uniformly distributed over $2^{\lfloor log p\rfloor}$.
-pub trait Sponge8: Sponge {
+pub trait SpongeExt: Sponge {
     fn squeeze_bytes_unsafe(&mut self, output: &mut [u8]);
+    fn export_unsafe(&self) -> Vec<Self::L>;
+    fn ratchet_unsafe(&mut self) -> &mut Self;
 }
 
 #[derive(Debug, Clone)]
-pub struct TagError(String);
+pub struct InvalidTag(String);
 
-impl From<&str> for TagError {
+impl From<&str> for InvalidTag {
     fn from(s: &str) -> Self {
         s.to_string().into()
     }
 }
 
-impl From<String> for TagError {
+impl From<String> for InvalidTag {
     fn from(s: String) -> Self {
         Self(s)
     }
@@ -196,7 +238,7 @@ enum Op {
 
 impl Op {
     /// Create a new OP from the portion of a tag.
-    fn new(id: char, count: Option<usize>) -> Result<Self, TagError> {
+    fn new(id: char, count: Option<usize>) -> Result<Self, InvalidTag> {
         match (id, count) {
             ('S', Some(c)) if c > 0 => Ok(Op::Squeeze(c)),
             (x, Some(c)) if x.is_alphabetic() && c > 0 => Ok(Op::Absorb(c)),
@@ -215,8 +257,8 @@ pub struct Safe<S: Sponge> {
     stack: VecDeque<Op>,
 }
 
-impl<S: Sponge8> Safe<S> {
-    fn parse_tag(tag: &str) -> Result<VecDeque<Op>, TagError> {
+impl<S: SpongeExt> Safe<S> {
+    fn parse_tag(tag: &str) -> Result<VecDeque<Op>, InvalidTag> {
         let (_domain_sep, io_pattern) = tag.split_once(" ").ok_or("Invalid tag string")?;
         let mut stack = VecDeque::new();
 
@@ -247,7 +289,7 @@ impl<S: Sponge8> Safe<S> {
     fn simplify_stack(
         mut dst: VecDeque<Op>,
         mut stack: VecDeque<Op>,
-    ) -> Result<VecDeque<Op>, TagError> {
+    ) -> Result<VecDeque<Op>, InvalidTag> {
         if stack.is_empty() {
             Ok(dst)
         } else {
@@ -278,7 +320,7 @@ impl<S: Sponge8> Safe<S> {
 
     /// Initialise a SAFE sponge,
     /// setting up the state of the sponge function and parsing the tag string.
-    pub fn new(tag: &str) -> Result<Self, TagError> {
+    pub fn new(tag: &str) -> Result<Self, InvalidTag> {
         let stack = Self::parse_tag(tag)?;
         let mut sponge = S::new();
         // start off absorbing the tag information
@@ -288,29 +330,31 @@ impl<S: Sponge8> Safe<S> {
     }
 
     /// Perform secure ratcheting.
-    pub fn ratchet(&mut self) -> Result<(), TagError>{
+    pub fn ratchet(&mut self) -> Result<&mut Self, InvalidTag> {
         if self.stack.pop_front().unwrap() != Op::Ratchet {
             Err("Invalid tag".into())
         } else {
             self.sponge.ratchet_unsafe();
-            Ok(())
+            Ok(self)
         }
     }
 
     /// Perform secure absorption of the elements in `input`.
-    pub fn absorb(&mut self, input: &[S::L]) -> Result<(), TagError> {
+    pub fn absorb(&mut self, input: &[S::L]) -> Result<&mut Self, InvalidTag> {
         let op = self.stack.pop_front().unwrap();
         if let Op::Absorb(length) = op {
             match length.cmp(&input.len()) {
-                Ordering::Less => Err(format!("Not enough input for absorb: requested {}", input.len()).into()),
+                Ordering::Less => {
+                    Err(format!("Not enough input for absorb: requested {}", input.len()).into())
+                }
                 Ordering::Equal => {
                     self.sponge.absorb_unsafe(input);
-                    Ok(())
+                    Ok(self)
                 }
                 Ordering::Greater => {
                     self.stack.push_front(Op::Absorb(length - input.len()));
                     self.sponge.absorb_unsafe(input);
-                    Ok(())
+                    Ok(self)
                 }
             }
         } else {
@@ -339,7 +383,7 @@ impl<S: Sponge8> Safe<S> {
     ///         if n+1 + p.bit_length() - alpha.bit_length() - (2^n-alpha).bit_length() >= 128:
     ///             return n
     /// ```
-    pub fn squeeze(&mut self, output: &mut [u8]) -> Result<(), TagError> {
+    pub fn squeeze(&mut self, output: &mut [u8]) -> Result<(), InvalidTag> {
         let op = self.stack.pop_front().unwrap();
         if let Op::Squeeze(length) = op {
             match length.cmp(&output.len()) {
@@ -360,7 +404,7 @@ impl<S: Sponge8> Safe<S> {
     }
 
     /// Destroyes the sponge state.
-    pub fn finish(self) -> Result<(), TagError> {
+    pub fn finish(self) -> Result<(), InvalidTag> {
         if self.stack.is_empty() {
             Ok(())
         } else {
@@ -370,12 +414,20 @@ impl<S: Sponge8> Safe<S> {
 }
 
 /// Builder for the prover state.
-pub struct TranscriptBuilder<S: Sponge8, FS: Sponge8<L = u8>> {
+pub struct TranscriptBuilder<S: SpongeExt, FS: SpongeExt<L = u8>> {
     merlin: Merlin<S>,
     fsponge: FS,
 }
 
-impl<S: Sponge8, FS: Sponge8<L = u8>> TranscriptBuilder<S, FS> {
+impl<S: SpongeExt, FS: SpongeExt<L = u8>> TranscriptBuilder<S, FS> {
+
+    pub(crate) fn new(mut fsponge: FS, merlin: Merlin<S>) -> Self {
+        let merlin_state = merlin.0.sponge.export_unsafe();
+        let encoded_state = &<S as Sponge>::L::to_bytes(&merlin_state);
+        fsponge.absorb_unsafe(encoded_state);
+        Self { fsponge, merlin }
+    }
+
     // rekey the private sponge with some additional secrets (i.e. with the witness)
     // and ratchet
     pub fn rekey(mut self, data: &[u8]) -> Self {
@@ -402,63 +454,67 @@ impl<S: Sponge8, FS: Sponge8<L = u8>> TranscriptBuilder<S, FS> {
 /// Merlin is wrapper around a sponge that provides a secure
 /// Fiat-Shamir implementation for public-coin protocols.
 #[derive(Clone)]
-pub struct Merlin<S: Sponge8>(Safe<S>);
+pub struct Merlin<S: SpongeExt>(Safe<S>);
 
-impl<S: Sponge8> Merlin<S> {
-    pub fn new(tag: &str) -> Result<Self, TagError> {
+impl<S: SpongeExt> Merlin<S> {
+    pub fn new(tag: &str) -> Result<Self, InvalidTag> {
         let safe_sponge = Safe::new(tag)?;
         Ok(Self(safe_sponge))
     }
 
-    pub fn absorb(&mut self, input: &[S::L]) -> Result<(), TagError> {
-        self.0.absorb(input)
+    pub fn absorb(&mut self, input: &[S::L]) -> Result<&mut Self, InvalidTag> {
+        self.0.absorb(input)?;
+        Ok(self)
     }
 
-    pub fn ratchet(&mut self) -> Result<(), TagError>{
-        self.0.ratchet()
+    pub fn ratchet(&mut self) -> Result<&mut Self, InvalidTag> {
+        self.0.ratchet()?;
+        Ok(self)
     }
 
-    pub fn finish(self) -> Result<(), TagError> {
+    pub fn finish(self) -> Result<(), InvalidTag> {
         self.0.finish()
     }
 
-    pub fn challenge_bytes(&mut self, mut dest: &mut [u8]) -> Result<(), TagError> {
+    pub fn challenge_bytes(&mut self, mut dest: &mut [u8]) -> Result<(), InvalidTag> {
         self.0.squeeze(&mut dest)
     }
 
     /// Convert this Merlin instance into an Arthur instance.
-    pub fn into_transcript<FS: Sponge8<L = u8>>(self) -> TranscriptBuilder<S, FS> {
+    pub fn into_transcript<FS: SpongeExt<L = u8>>(self) -> TranscriptBuilder<S, FS> {
         let fsponge = FS::new();
         let merlin = self;
 
-        TranscriptBuilder { merlin, fsponge }
+        TranscriptBuilder::new(fsponge, merlin)
     }
 }
 
 /// The state of an interactive proof system.
 /// Holds the state of the verifier, and provides the random coins for the prover.
-pub struct Transcript<S: Sponge8, FS: Sponge<L = u8>, R: RngCore + CryptoRng> {
+pub struct Transcript<S: SpongeExt, FS: Sponge<L = u8>, R: RngCore + CryptoRng> {
     /// The randomness state of the prover.
     arthur: Arthur<FS, R>,
     merlin: Merlin<S>,
 }
 
-impl<S: Sponge8, FS: Sponge<L = u8>, R: RngCore + CryptoRng> Transcript<S, FS, R> {
+impl<S: SpongeExt, FS: Sponge<L = u8>, R: RngCore + CryptoRng> Transcript<S, FS, R> {
     #[inline]
-    pub fn absorb(&mut self, input: &[S::L]) -> Result<(), TagError> {
-        self.merlin.absorb(input)
+    pub fn absorb(&mut self, input: &[S::L]) -> Result<&mut Self, InvalidTag> {
+        self.merlin.absorb(input)?;
+        Ok(self)
     }
 
     /// Get a challenge of `count` bytes.
-    pub fn challenge_bytes(&mut self, dest: &mut [u8]) -> Result<(), TagError> {
+    pub fn challenge_bytes(&mut self, dest: &mut [u8]) -> Result<(), InvalidTag> {
         self.merlin.challenge_bytes(dest)?;
         self.arthur.sponge.absorb_unsafe(dest);
         Ok(())
     }
 
     #[inline]
-    pub fn ratchet(&mut self) -> Result<(), TagError> {
-        self.merlin.ratchet()
+    pub fn ratchet(&mut self) -> Result<&mut Self, InvalidTag> {
+        self.merlin.ratchet()?;
+        Ok(self)
     }
 
     #[inline]
@@ -466,7 +522,7 @@ impl<S: Sponge8, FS: Sponge<L = u8>, R: RngCore + CryptoRng> Transcript<S, FS, R
         &mut self.arthur
     }
 
-    pub fn finish(self) -> Result<(), TagError> {
+    pub fn finish(self) -> Result<(), InvalidTag> {
         self.arthur.sponge.finish();
         self.merlin.finish()
     }
@@ -479,102 +535,5 @@ impl Lane for u8 {
 
     fn pack_bytes(bytes: &[u8]) -> Vec<Self> {
         bytes.to_vec()
-    }
-}
-
-use crate::sponge::poseidon::PoseidonSponge;
-use ark_bls12_377::Fq;
-use ark_ff::{BigInteger, PrimeField};
-use crate::sponge::CryptographicSponge;
-
-use super::poseidon::PoseidonConfig;
-use ark_std::Zero;
-
-impl Lane for Fq {
-    fn to_bytes(a: &[Self]) -> Vec<u8> {
-        a.iter()
-            .map(|x| x.into_bigint().to_bytes_le())
-            .flatten()
-            .collect()
-    }
-
-    fn pack_bytes(bytes: &[u8]) -> Vec<Self> {
-        bytes.iter().map(|&x| Fq::from(x)).collect()
-    }
-}
-
-fn poseidon_test_config<F: PrimeField>() -> PoseidonConfig<F> {
-    use crate::sponge::poseidon::find_poseidon_ark_and_mds;
-    let full_rounds = 8;
-    let partial_rounds = 31;
-    let alpha = 5;
-    let rate = 2;
-
-    let (ark, mds) = find_poseidon_ark_and_mds::<F>(
-        F::MODULUS_BIT_SIZE as u64,
-        rate,
-        full_rounds,
-        partial_rounds,
-        0,
-    );
-
-    PoseidonConfig::new(
-        full_rounds as usize,
-        partial_rounds as usize,
-        alpha,
-        mds,
-        ark,
-        rate,
-        1,
-    )
-}
-
-
-impl Sponge for PoseidonSponge<Fq> {
-    type L = Fq;
-
-    fn new() -> Self {
-        let params = poseidon_test_config::<Fq>();
-        <Self as CryptographicSponge>::new(&params)
-    }
-    fn absorb_unsafe(&mut self, input: &[Self::L]) -> &mut Self {
-        self.absorb(&input);
-        self
-    }
-
-    fn squeeze_unsafe(&mut self, output: &mut [Self::L]) -> &mut Self {
-        let num_elements = output.len();
-        let buf = <Self as CryptographicSponge>::squeeze_field_elements(self, num_elements);
-        output.copy_from_slice(&buf);
-        self
-    }
-
-    fn ratchet_unsafe(&mut self) -> &mut Self {
-        let digest = self.squeeze_field_elements(self.parameters.capacity);
-        self.state[self.parameters.rate..].copy_from_slice(&digest);
-        self.state[.. self.parameters.rate]
-            .iter_mut()
-            .for_each(|x| *x = Fq::zero());
-        self
-    }
-
-    fn finish(self) {
-        // TODO: zeroize
-    }
-}
-
-impl Sponge8 for PoseidonSponge<Fq> {
-    fn squeeze_bytes_unsafe(&mut self, output: &mut [u8]) {
-        // obtained with the above function
-        let n = 251 / 8;
-        let len = (output.len() + n-1) / n;
-        let mut buf = vec![Self::L::zero(); len];
-        self.squeeze_unsafe(buf.as_mut_slice());
-        for i in 0 .. len-1 {
-            output[i*n .. (i+1)*n].copy_from_slice(&buf[i].into_bigint().to_bytes_le()[.. n]);
-        }
-        let remainder = output.len() % n;
-        output[n*(len-1) ..].copy_from_slice(&buf[len-1].into_bigint().to_bytes_le()[.. remainder]);
-
     }
 }

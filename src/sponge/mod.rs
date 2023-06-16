@@ -9,9 +9,6 @@ pub mod constraints;
 mod absorb;
 pub use absorb::*;
 
-/// Fiat-Shamir for public-coin arguments.
-pub mod fs;
-
 /// The sponge for Poseidon
 ///
 /// This implementation of Poseidon is entirely from Fractal's implementation in [COS20][cos]

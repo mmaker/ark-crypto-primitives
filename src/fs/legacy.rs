@@ -12,7 +12,7 @@ use digest::Digest;
 
 use sha2;
 
-use super::{Sponge, Sponge8};
+use super::{Sponge, SpongeExt};
 
 #[derive(Clone)]
 pub struct Sha2Bridge {
@@ -49,6 +49,7 @@ impl Sha2Bridge {
 
 impl Sponge for Sha2Bridge {
     type L = u8;
+    type State = [u8; Self::DIGEST_SIZE];
 
     fn new() -> Self {
         let mut hasher = sha2::Sha256::new();
@@ -59,6 +60,10 @@ impl Sponge for Sha2Bridge {
             mode: Mode::Ratcheted(0),
             leftovers: Vec::new(),
         }
+    }
+
+    fn state(&self) -> Self::State {
+        self.cv
     }
 
     fn absorb_unsafe(&mut self, input: &[Self::L]) -> &mut Self {
@@ -118,6 +123,16 @@ impl Sponge for Sha2Bridge {
         }
     }
 
+    fn finish(self) {
+        // Nothing to do
+    }
+}
+
+impl SpongeExt for Sha2Bridge {
+    fn squeeze_bytes_unsafe(&mut self, output: &mut [u8]) {
+        self.squeeze_unsafe(output);
+    }
+
     fn ratchet_unsafe(&mut self) -> &mut Self {
         match self.mode {
             Mode::Absorb => self.cv.copy_from_slice(&self.hasher.finalize_reset()[..]),
@@ -126,13 +141,7 @@ impl Sponge for Sha2Bridge {
         self
     }
 
-    fn finish(self) {
-        // Nothing to do
-    }
-}
-
-impl Sponge8 for Sha2Bridge {
-    fn squeeze_bytes_unsafe(&mut self, output: &mut [u8]) {
-        self.squeeze_unsafe(output);
+    fn export_unsafe(&self) -> Vec<u8> {
+        self.state().to_vec()
     }
 }
