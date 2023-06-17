@@ -8,14 +8,14 @@
 //!
 //! ```rust
 //! use ark_crypto_primitives::fs::legacy::Sha2Bridge;
-//! use ark_crypto_primitives::fs::ext::{FieldChallenges, AbsorbSerializable};
-//! use ark_crypto_primitives::fs::{Merlin, InvalidTag};
+//! use ark_crypto_primitives::fs::ext::FieldChallenges;
+//! use ark_crypto_primitives::fs::{IOPattern, InvalidTag};
 //! use ark_crypto_primitives::sponge::poseidon::PoseidonSponge;
 //! use ark_crypto_primitives::fs::poseidon_ng::PoseidonSpongeNG;
 //! use rand::rngs::OsRng;
 //! use rand::RngCore;
-//! use ark_bls12_377::{Fr, Fq};
-//! use ark_bls12_377::G1Projective as G1;
+//! use ark_ed_on_bls12_381::{Fr, Fq};
+//! use ark_ed_on_bls12_381::{EdwardsAffine as G1, JubjubConfig as C};
 //! use ark_ec::{AffineRepr, CurveGroup, Group};
 //! use ark_std::UniformRand;
 //!
@@ -25,14 +25,26 @@
 //!     // - the statement will absorb 48 * 2 elements
 //!     // - the protocol will: absorb two elements, squeeze 16 bytes.
 //!     // utilities for creating tag strings automatically will be added in the future.
-//!     let mut merlin = Merlin::<PoseidonSpongeNG<Fq>>::new("example.com A48A48,A2S16")?;
+//!     let mut merlin = IOPattern::new("example.com")?
+//!                 // the generator
+//!                 .absorb(2)
+//!                 // the public-key
+//!                 .absorb(2)
+//!                 // marker for end of statement
+//!                 .ratchet()
+//!                 // the commitment
+//!                 .absorb(2)
+//!                 // the challenge
+//!                 .squeeze(16)
+//!                 .into_merlin::<PoseidonSpongeNG<Fq>>();
 //!     // Absorb the statement.
-//!     merlin.absorb_serializable(pk)?
-//!           .absorb_serializable(G1::generator())?
-//!           .ratchet()?;
-//!     // At this point the state can be cloned, or exported
-//!     // so that the proof can be verified inside another sponge.
-//!     // let mut verifier_state = merlin.clone();
+//!     let g = G1::generator();
+//!     merlin.absorb(&[pk.x, pk.y])?
+//!           .absorb(&[g.x, g.y])?
+//!           .statement()?;
+//!     // The state can be exported with
+//!     // .finalize_preprocessing()?;
+//!     // And the proof can be verified inside another sponge.
 //!
 //!     // Build an RNG that is tied to the protocol transcript.
 //!     // Using a fast sponge, rekeying it with some witness data,
@@ -41,14 +53,14 @@
 //!         .rekey(b"witness data")
 //!         .finalize_with_rng(OsRng);
 //!
-//!     // Actual proof.
+//!     // Commitment: use the prover transcript to seed randomness.
 //!     let k = Fr::rand(&mut transcript.rng());
-//!     let K = G1::generator().into_affine() * k;
+//!     let K = G1::generator() * k;
 //!     // Absorptions can be streamed:
 //!     // transcript.absorb(&[K.x])?; transcript.absorb(&[K.y])?;
 //!     transcript.absorb(&[K.x, K.y])?;
 //!
-//!     // Get a challenge from the verifier.
+//!     // Get a challenge of 16 bytes and map it into the field Fr.
 //!     let challenge = transcript.get_field_challenge::<Fr>(16)?;
 //!     // At any point, the prover can get a csrng from the transcript.
 //!     let response = k + challenge * sk;
@@ -58,7 +70,7 @@
 //! }
 //!
 //! let sk = Fr::rand(&mut OsRng);
-//! let pk = G1::generator() * sk;
+//! let pk = (G1::generator() * sk).into();
 //! let proof = schnorr_proof(sk, pk).expect("Valid proof");
 //! ```
 //!
@@ -178,6 +190,40 @@ pub trait Sponge {
     fn from_capacity(input: &[Self::L]) -> Self;
     /// Securely destroys the sponge and its internal state.
     fn finish(self);
+}
+
+pub struct IOPattern(String);
+
+impl IOPattern {
+    pub fn new(domsep: &str) -> Result<Self, InvalidTag> {
+        if domsep.contains(' ') {
+            Err("Domain Separator can't contain ' '".into())
+        } else {
+            let tag_base = domsep.to_string() + &" ";
+            Ok(Self(tag_base))
+        }
+    }
+
+    pub fn absorb(self, count: usize) -> Self {
+        Self(self.0 + &format!("A{}", count))
+    }
+
+    pub fn squeeze(self, count: usize) -> Self {
+        Self(self.0 + &format!("S{}", count))
+    }
+
+    pub fn ratchet(self) -> Self {
+        Self(self.0 + &",")
+    }
+
+    pub fn finalize(self) -> String {
+        self.0
+    }
+
+    pub fn into_merlin<S: SpongeExt>(self) -> Merlin<S> {
+        let tag = self.finalize();
+        Merlin::new(&tag).expect("Internal error. Please submit issue")
+    }
 }
 
 /// A [`crate::fs::SpongeExt`] additionally provides
@@ -468,6 +514,15 @@ impl<S: SpongeExt> Merlin<S> {
     pub fn ratchet(&mut self) -> Result<&mut Self, InvalidTag> {
         self.0.ratchet()?;
         Ok(self)
+    }
+
+    pub fn statement(&mut self) -> Result<&mut Self, InvalidTag> {
+        self.ratchet()
+    }
+
+    pub fn preprocessed_statement(&mut self) -> Result<Vec<S::L>, InvalidTag> {
+        self.ratchet()?;
+        Ok(self.0.sponge.export_unsafe())
     }
 
     pub fn finish(self) -> Result<(), InvalidTag> {

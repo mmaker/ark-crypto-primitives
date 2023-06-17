@@ -1,6 +1,11 @@
-use crate::sponge::{CryptographicSponge, poseidon::{PoseidonDefaultConfigField, PoseidonSponge}};
-use super::{sponge::{SpongeConfig, DuplexSponge}, Lane};
-
+use super::{
+    sponge::{DuplexSponge, SpongeConfig},
+    Lane,
+};
+use crate::sponge::{
+    poseidon::{PoseidonDefaultConfigField, PoseidonSponge},
+    CryptographicSponge,
+};
 
 impl<F: Lane + PoseidonDefaultConfigField> SpongeConfig for PoseidonSponge<F> {
     type L = F;
@@ -24,6 +29,5 @@ impl<F: Lane + PoseidonDefaultConfigField> SpongeConfig for PoseidonSponge<F> {
         state.clone_from_slice(&mut self.state)
     }
 }
-
 
 pub type PoseidonSpongeNG<F> = DuplexSponge<PoseidonSponge<F>>;

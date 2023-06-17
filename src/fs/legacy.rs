@@ -127,7 +127,7 @@ impl Sponge for Sha2Bridge {
     }
 
     fn finish(self) {
-        todo!()
+        // XXX. zeroize
     }
 }
 

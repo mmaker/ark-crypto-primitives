@@ -1,21 +1,7 @@
-use ark_bls12_377::Fq;
 use ark_ff::{BigInteger, PrimeField};
 
-use crate::fs::{Lane, Sponge, SpongeExt};
+use crate::{fs::{Lane, Sponge, SpongeExt}, sponge::poseidon::PoseidonConfig};
 use ark_std::Zero;
-
-impl Lane for Fq {
-    fn to_bytes(a: &[Self]) -> Vec<u8> {
-        a.iter()
-            .map(|x| x.into_bigint().to_bytes_le())
-            .flatten()
-            .collect()
-    }
-
-    fn pack_bytes(bytes: &[u8]) -> Vec<Self> {
-        bytes.iter().map(|&x| Fq::from(x)).collect()
-    }
-}
 
 pub trait SpongeConfig {
     // the lane requirement here is not really needed
@@ -34,13 +20,18 @@ pub struct DuplexSponge<C: SpongeConfig> {
     squeeze_pos: usize,
 }
 
-impl<L: Lane, C: SpongeConfig<L=L>> Sponge for DuplexSponge<C> {
+impl<L: Lane, C: SpongeConfig<L = L>> Sponge for DuplexSponge<C> {
     type L = L;
 
     fn new() -> Self {
         let config = C::new();
         let state = vec![Self::L::default(); config.capacity() + config.rate()];
-        Self {config, state, absorb_pos: 0, squeeze_pos: 0 }
+        Self {
+            config,
+            state,
+            absorb_pos: 0,
+            squeeze_pos: 0,
+        }
     }
 
     fn absorb_unsafe(&mut self, input: &[Self::L]) -> &mut Self {
@@ -65,9 +56,9 @@ impl<L: Lane, C: SpongeConfig<L=L>> Sponge for DuplexSponge<C> {
         }
 
         if self.squeeze_pos == self.config.rate() {
-                self.squeeze_pos = 0;
-                self.absorb_pos = 0;
-                self.config.permute(&mut self.state);
+            self.squeeze_pos = 0;
+            self.absorb_pos = 0;
+            self.config.permute(&mut self.state);
         }
 
         output[0] = self.state[self.squeeze_pos];
@@ -86,10 +77,9 @@ impl<L: Lane, C: SpongeConfig<L=L>> Sponge for DuplexSponge<C> {
         sponge.state[sponge.config.rate()..].copy_from_slice(input);
         sponge
     }
-
 }
 
-impl<F: Lane + PrimeField, C: SpongeConfig<L=F>> SpongeExt for DuplexSponge<C> {
+impl<F: Lane + PrimeField, C: SpongeConfig<L = F>> SpongeExt for DuplexSponge<C> {
     fn squeeze_bytes_unsafe(&mut self, output: &mut [u8]) {
         // obtained with the above function
         let n = 251 / 8;
@@ -116,5 +106,70 @@ impl<F: Lane + PrimeField, C: SpongeConfig<L=F>> SpongeExt for DuplexSponge<C> {
             .iter_mut()
             .for_each(|x| *x = F::zero());
         self
+    }
+}
+
+
+
+macro_rules! impl_lane {
+    ($t:ident) => {
+        impl Lane for $t {
+            fn to_bytes(a: &[Self]) -> Vec<u8> {
+                a.iter()
+                    .map(|x| x.into_bigint().to_bytes_be())
+                    .flatten()
+                    .collect()
+            }
+
+            fn pack_bytes(bytes: &[u8]) -> Vec<Self> {
+                use ark_ff::Field;
+
+                let n = 2;
+                let mut packed = Vec::new();
+                for chunk in bytes.chunks(n) {
+                    packed.push(Self::from_random_bytes(chunk).unwrap());
+                }
+                packed
+            }
+        }
+    };
+}
+
+
+use ark_ed_on_bls12_381::Fq;
+impl_lane!(Fq);
+
+impl crate::sponge::poseidon::PoseidonDefaultConfigField for Fq {
+    fn get_default_poseidon_parameters(
+        _rate: usize,
+        _optimized_for_weights: bool,
+    ) -> Option<crate::sponge::poseidon::PoseidonConfig<Self>> {
+        use ark_std::{test_rng, UniformRand};
+
+        let mut test_rng = test_rng();
+
+        let mut mds = vec![vec![]; 3];
+        for i in 0..3 {
+            for _ in 0..3 {
+                mds[i].push(Fq::rand(&mut test_rng));
+            }
+        }
+
+        let mut ark = vec![vec![]; 8 + 24];
+        for i in 0..8 + 24 {
+            for _ in 0..3 {
+                ark[i].push(Fq::rand(&mut test_rng));
+            }
+        }
+
+        let mut test_a = Vec::new();
+        let mut test_b = Vec::new();
+        for _ in 0..3 {
+            test_a.push(Fq::rand(&mut test_rng));
+            test_b.push(Fq::rand(&mut test_rng));
+        }
+
+        let params = PoseidonConfig::<Fq>::new(8, 24, 31, mds, ark, 2, 1);
+        Some(params)
     }
 }
