@@ -50,8 +50,8 @@ impl<L: Lane, C: SpongeConfig<L = L>> Sponge for DuplexSponge<C> {
             self.absorb_pos = 0;
             self
         } else {
-            // XXX. absorbing in overwrite mode
-            self.state[self.absorb_pos] = input[0];
+            // XXX. maybe we should absorb in overwrite mode?
+            self.state[self.absorb_pos] += input[0];
             self.absorb_pos += 1;
             self.absorb_unsafe(&input[1..])
         }

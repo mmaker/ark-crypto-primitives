@@ -43,7 +43,7 @@ impl Sha2Bridge {
     // when combined with the digest of the state and the current index.
     const MASK_SQUEEZE: [u8; Self::_MASK_SQUEEZE_LEN] = {
         let mut mask_squeeze = [0u8; Self::_MASK_SQUEEZE_LEN];
-        mask_squeeze[1] = 1u8;
+        mask_squeeze[0] = 1u8;
         mask_squeeze
     };
 }

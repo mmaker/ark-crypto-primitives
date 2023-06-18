@@ -1,7 +1,7 @@
 //!
 //! **This is work in progress, not suitable for production.**
 //!
-//! This library is a secure construction for zero-knowledge proofs based on SAFE.
+//! This library is a secure construction for zero-knowledge proofs based on [SAFE].
 //! It enables secure provision of randomness for the prover and secure generation
 //! of random coins for the verifier.
 //! This allows for the implementation of non-interactive protocols in a readable manner.
@@ -25,7 +25,7 @@
 //!                 // the public-key
 //!                 .absorb(2)
 //!                 // marker for end of statement
-//!                 // Also allows for precomputation.
+//!                 // (also allows for precomputation)
 //!                 .ratchet()
 //!                 // the commitment
 //!                 .absorb(2)
@@ -51,8 +51,7 @@
 //!     let K = GG::generator() * k;
 //!     // Absorptions can be streamed:
 //!     // transcript.absorb(&[K.x])?; transcript.absorb(&[K.y])?;
-//!     transcript
-//!         .absorb(&[K.x, K.y])?;
+//!     transcript.absorb(&[K.x, K.y])?;
 //!
 //!     // Get a challenge of 16 bytes and map it into the field Fr.
 //!     let challenge = transcript.get_field_challenge::<Fr>(16)?;
@@ -142,12 +141,15 @@
 //!     - statically chain the tags.
 //!         This requires a larger overhead on the side of the engineer.
 //!
+//! [SAFE]: https://eprint.iacr.org/2023/522
 //! [Merlin]: https://github.com/dalek-cryptography/merlin
 //! [`digest::Digest`]: https://docs.rs/digest/latest/digest/trait.Digest.html
 
 use ark_std::cmp::Ordering;
 use ark_std::collections::VecDeque;
 use ark_std::rand::{CryptoRng, RngCore};
+use zeroize::Zeroize;
+use ark_std::ops::AddAssign;
 
 /// Extension for the public-coin transcripts.
 pub mod ark_plugins;
@@ -164,7 +166,7 @@ use arthur::Arthur;
 
 /// A Lane is the basic unit a sponge function works on.
 /// We need only two things from a lane: the ability to convert it to bytes and back.
-pub trait Lane: Sized + Default + Copy + zeroize::Zeroize {
+pub trait Lane: AddAssign + Copy + Default + Sized + Zeroize {
     fn to_bytes(a: &[Self]) -> Vec<u8>;
     fn pack_bytes(bytes: &[u8]) -> Vec<Self>;
 }
@@ -187,6 +189,9 @@ pub trait Sponge {
     fn finish(self);
 }
 
+
+/// A builder for tag strings to be used within the SAFE API,
+/// to construct the verifier transcript.
 pub struct IOPattern(String);
 
 impl IOPattern {
@@ -237,6 +242,8 @@ impl IOPattern {
 /// this operation is non-trivial for algebraic hashes: there is no guarantee that the output
 /// $\pmod p$ is uniformly distributed over $2^{\lfloor log p\rfloor}$.
 pub trait SpongeExt: Sponge {
+    /// Squeeze bytes from the sponge.
+    ///
     /// While this function is trivial for byte-oriented hashes,
     /// for algebraic hashes, it requires proper implementation.
     /// Many implementations simply truncate the least-significant bits, but this approach
@@ -257,10 +264,25 @@ pub trait SpongeExt: Sponge {
     ///             return n
     /// ```
     fn squeeze_bytes_unsafe(&mut self, output: &mut [u8]);
+
+    /// Exports the compressed hash state, allowing for preprocessing.
     fn export_unsafe(&self) -> Vec<Self::L>;
+
+    /// Ratcheting.
+    ///
+    /// This operation consists in:
+    /// - permute the state.
+    /// - set the rate to zero.
+    /// This has the effect that the state is compressed
+    /// and the state holds no information about the elements absorbed so far.
     fn ratchet_unsafe(&mut self) -> &mut Self;
 }
 
+
+/// Invalid IO Pattern.
+///
+/// This error signals that a wrong IO Pattern has been declared
+/// upon instantiation of the SAFE sponge.
 #[derive(Debug, Clone)]
 pub struct InvalidTag(String);
 
@@ -395,6 +417,9 @@ impl<S: SpongeExt> Safe<S> {
     }
 
     /// Perform secure ratcheting.
+    ///
+    /// Ratcheting allows for a more efficient preprocessing,
+    /// and removes information of past absorptions from the state.
     pub fn ratchet(&mut self) -> Result<&mut Self, InvalidTag> {
         if self.stack.pop_front().unwrap() != Op::Ratchet {
             Err("Invalid tag".into())
