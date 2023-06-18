@@ -7,30 +7,25 @@
 //! This allows for the implementation of non-interactive protocols in a readable manner.
 //!
 //! ```rust
-//! use ark_crypto_primitives::fs::legacy::Sha2Bridge;
-//! use ark_crypto_primitives::fs::ext::FieldChallenges;
+//! use ark_crypto_primitives::fs::{legacy::Sha2Bridge, poseidon_ng::PoseidonSpongeNG};
+//! use ark_crypto_primitives::fs::ark_plugins::{FieldChallenges, RekeySerializable};
 //! use ark_crypto_primitives::fs::{IOPattern, InvalidTag};
-//! use ark_crypto_primitives::sponge::poseidon::PoseidonSponge;
-//! use ark_crypto_primitives::fs::poseidon_ng::PoseidonSpongeNG;
 //! use rand::rngs::OsRng;
-//! use rand::RngCore;
-//! use ark_ed_on_bls12_381::{Fr, Fq};
-//! use ark_ed_on_bls12_381::{EdwardsAffine as G1, JubjubConfig as C};
+//! use ark_ed_on_bls12_381::{Fr, Fq, EdwardsAffine as GG};
 //! use ark_ec::{AffineRepr, CurveGroup, Group};
 //! use ark_std::UniformRand;
 //!
-//! fn schnorr_proof(sk: Fr, pk: G1) -> Result<(Fr, Fr), InvalidTag> {
-//!     // create a new verifier transcript for the protocol identified by the tag.
-//!     // the tag string indicates that:
-//!     // - the statement will absorb 48 * 2 elements
-//!     // - the protocol will: absorb two elements, squeeze 16 bytes.
-//!     // utilities for creating tag strings automatically will be added in the future.
+//! fn schnorr_proof(sk: Fr, g: GG, pk: GG) -> Result<(Fr, Fr), InvalidTag> {
+//!     // create a new verifier transcript for the protocol that will perform
+//!     // the operations below. Alternatively, one can just invoke the `Merlin` API
+//!     // directly via Merlin::new("example.com A2A2,A2S16");
 //!     let mut merlin = IOPattern::new("example.com")?
 //!                 // the generator
 //!                 .absorb(2)
 //!                 // the public-key
 //!                 .absorb(2)
 //!                 // marker for end of statement
+//!                 // Also allows for precomputation.
 //!                 .ratchet()
 //!                 // the commitment
 //!                 .absorb(2)
@@ -38,27 +33,26 @@
 //!                 .squeeze(16)
 //!                 .into_merlin::<PoseidonSpongeNG<Fq>>();
 //!     // Absorb the statement.
-//!     let g = G1::generator();
-//!     merlin.absorb(&[pk.x, pk.y])?
-//!           .absorb(&[g.x, g.y])?
-//!           .statement()?;
-//!     // The state can be exported with
-//!     // .finalize_preprocessing()?;
-//!     // And the proof can be verified inside another sponge.
+//!     merlin.absorb(&[g.x, g.y])?
+//!           .absorb(&[pk.x, pk.y])?
+//!           .ratchet()?;
+//!     // The state can be exported
+//!     // and the proof can be verified inside another sponge.
 //!
-//!     // Build an RNG that is tied to the protocol transcript.
-//!     // Using a fast sponge, rekeying it with some witness data,
-//!     // and seeding it with a cryptographically-secure random number generator.
+//!     // Build an RNG that is tied to the protocol transcript,
+//!     // seeding it with the witness (optional) and
+//!     // a cryptographically-secure random number generator.
 //!     let mut transcript = merlin.into_transcript::<Sha2Bridge>()
-//!         .rekey(b"witness data")
+//!         .rekey_serializable(sk)
 //!         .finalize_with_rng(OsRng);
 //!
 //!     // Commitment: use the prover transcript to seed randomness.
 //!     let k = Fr::rand(&mut transcript.rng());
-//!     let K = G1::generator() * k;
+//!     let K = GG::generator() * k;
 //!     // Absorptions can be streamed:
 //!     // transcript.absorb(&[K.x])?; transcript.absorb(&[K.y])?;
-//!     transcript.absorb(&[K.x, K.y])?;
+//!     transcript
+//!         .absorb(&[K.x, K.y])?;
 //!
 //!     // Get a challenge of 16 bytes and map it into the field Fr.
 //!     let challenge = transcript.get_field_challenge::<Fr>(16)?;
@@ -70,8 +64,9 @@
 //! }
 //!
 //! let sk = Fr::rand(&mut OsRng);
-//! let pk = (G1::generator() * sk).into();
-//! let proof = schnorr_proof(sk, pk).expect("Valid proof");
+//! let generator = GG::generator();
+//! let pk = (generator * sk).into();
+//! let proof = schnorr_proof(sk, generator, pk).expect("Valid proof");
 //! ```
 //!
 //! # Features
@@ -154,9 +149,9 @@ use ark_std::cmp::Ordering;
 use ark_std::collections::VecDeque;
 use ark_std::rand::{CryptoRng, RngCore};
 
-mod arthur;
 /// Extension for the public-coin transcripts.
-pub mod ext;
+pub mod ark_plugins;
+mod arthur;
 /// Support for legacy hash functions (SHA2).
 pub mod legacy;
 /// Support for sponge functions.
@@ -169,7 +164,7 @@ use arthur::Arthur;
 
 /// A Lane is the basic unit a sponge function works on.
 /// We need only two things from a lane: the ability to convert it to bytes and back.
-pub trait Lane: Sized + Default + Copy {
+pub trait Lane: Sized + Default + Copy + zeroize::Zeroize {
     fn to_bytes(a: &[Self]) -> Vec<u8>;
     fn pack_bytes(bytes: &[u8]) -> Vec<Self>;
 }
@@ -223,6 +218,16 @@ impl IOPattern {
     pub fn into_merlin<S: SpongeExt>(self) -> Merlin<S> {
         let tag = self.finalize();
         Merlin::new(&tag).expect("Internal error. Please submit issue")
+    }
+
+    pub fn into_transcript<S, R>(self, csrng: R) -> Transcript<S, S, R>
+    where
+        S: SpongeExt<L = u8>,
+        R: RngCore + CryptoRng,
+    {
+        self.into_merlin()
+            .into_transcript()
+            .finalize_with_rng(csrng)
     }
 }
 
@@ -516,11 +521,7 @@ impl<S: SpongeExt> Merlin<S> {
         Ok(self)
     }
 
-    pub fn statement(&mut self) -> Result<&mut Self, InvalidTag> {
-        self.ratchet()
-    }
-
-    pub fn preprocessed_statement(&mut self) -> Result<Vec<S::L>, InvalidTag> {
+    pub fn export_ratcheted(&mut self) -> Result<Vec<S::L>, InvalidTag> {
         self.ratchet()?;
         Ok(self.0.sponge.export_unsafe())
     }

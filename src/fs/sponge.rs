@@ -1,8 +1,15 @@
 use ark_ff::{BigInteger, PrimeField};
+use zeroize::Zeroize;
 
-use crate::{fs::{Lane, Sponge, SpongeExt}, sponge::poseidon::PoseidonConfig};
+use crate::{
+    fs::{Lane, Sponge, SpongeExt},
+    sponge::poseidon::PoseidonConfig,
+};
 use ark_std::Zero;
 
+/// A sponge configuration.
+///
+///
 pub trait SpongeConfig {
     // the lane requirement here is not really needed
     type L: Lane;
@@ -66,9 +73,8 @@ impl<L: Lane, C: SpongeConfig<L = L>> Sponge for DuplexSponge<C> {
         self.squeeze_unsafe(&mut output[1..])
     }
 
-    fn finish(self) {
-        // zeroize::Zeroize::zeroize(&mut self.state);
-        todo!()
+    fn finish(mut self) {
+        self.state.zeroize();
     }
 
     fn from_capacity(input: &[Self::L]) -> Self {
@@ -109,8 +115,6 @@ impl<F: Lane + PrimeField, C: SpongeConfig<L = F>> SpongeExt for DuplexSponge<C>
     }
 }
 
-
-
 macro_rules! impl_lane {
     ($t:ident) => {
         impl Lane for $t {
@@ -134,7 +138,6 @@ macro_rules! impl_lane {
         }
     };
 }
-
 
 use ark_ed_on_bls12_381::Fq;
 impl_lane!(Fq);

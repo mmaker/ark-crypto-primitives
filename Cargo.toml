@@ -25,6 +25,7 @@ ark-ed-on-bls12-381 = { version = "^0.4.0", default-features = false, features =
 
 blake2 = { version = "0.10", default-features = false }
 sha2 = { version = "0.10", default-features = false }
+# keccak = { version = "0.1.0", default-features = false }
 digest = { version = "0.10", default-features = false }
 zeroize = "1.6.0"
 

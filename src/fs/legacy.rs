@@ -7,10 +7,10 @@
  *   squeeze(1); squeeze(1); squeeze(1) = squeeze(3);
  *
  */
-use core::mem::size_of;
 use digest::Digest;
 
 use sha2;
+use zeroize::Zeroize;
 
 use super::{Sponge, SpongeExt};
 
@@ -34,7 +34,8 @@ enum Mode {
 impl Sha2Bridge {
     const BLOCK_SIZE: usize = 64;
     const DIGEST_SIZE: usize = 32;
-    const _MASK_SQUEEZE_LEN: usize = Self::BLOCK_SIZE - Self::DIGEST_SIZE - size_of::<usize>();
+    const _MASK_SQUEEZE_LEN: usize =
+        (Self::BLOCK_SIZE - Self::DIGEST_SIZE - core::mem::size_of::<usize>());
 
     const MASK_ABSORB: [u8; Self::BLOCK_SIZE] = [0u8; Self::BLOCK_SIZE];
 
@@ -126,8 +127,9 @@ impl Sponge for Sha2Bridge {
         }
     }
 
-    fn finish(self) {
-        // XXX. zeroize
+    fn finish(mut self) {
+        self.cv.zeroize();
+        self.hasher.reset();
     }
 }
 

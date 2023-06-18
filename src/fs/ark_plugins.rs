@@ -2,7 +2,7 @@ use ark_ff::PrimeField;
 use ark_serialize::CanonicalSerialize;
 use ark_std::rand::{CryptoRng, RngCore};
 
-use super::{InvalidTag, Lane, Transcript};
+use super::{InvalidTag, Lane, Transcript, TranscriptBuilder};
 use super::{Merlin, SpongeExt};
 
 pub trait FieldChallenges {
@@ -14,6 +14,10 @@ pub trait AbsorbSerializable {
         &mut self,
         input: S,
     ) -> Result<&mut Self, InvalidTag>;
+}
+
+pub trait RekeySerializable {
+    fn rekey_serializable<S: CanonicalSerialize>(self, input: S) -> Self;
 }
 
 impl<S: SpongeExt> AbsorbSerializable for Merlin<S> {
@@ -60,5 +64,13 @@ impl<S: SpongeExt, FS: SpongeExt<L = u8>, R: RngCore + CryptoRng> FieldChallenge
 {
     fn get_field_challenge<F: PrimeField>(&mut self, byte_count: usize) -> Result<F, InvalidTag> {
         self.merlin.get_field_challenge(byte_count)
+    }
+}
+
+impl<S: SpongeExt, FS: SpongeExt<L = u8>> RekeySerializable for TranscriptBuilder<S, FS> {
+    fn rekey_serializable<CS: CanonicalSerialize>(self, input: CS) -> Self {
+        let mut writer = Vec::new();
+        input.serialize_compressed(&mut writer).unwrap();
+        self.rekey(writer.as_slice())
     }
 }
