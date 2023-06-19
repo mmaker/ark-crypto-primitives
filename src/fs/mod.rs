@@ -162,7 +162,6 @@ pub mod sponge;
 /// New implementation of the poseidon sponge function.
 pub mod poseidon_ng;
 
-use crate::fs::legacy::Sha2Bridge;
 use arthur::Arthur;
 use rand::rngs::OsRng;
 
@@ -559,8 +558,8 @@ impl<S: SpongeExt> Merlin<S> {
     }
 
     /// Convert this Merlin instance into an Arthur instance.
-    pub fn into_transcript(self) -> TranscriptBuilder<S, Sha2Bridge> {
-        let fsponge = Sha2Bridge::new();
+    pub fn into_transcript(self) -> TranscriptBuilder<S, DefaultHash> {
+        let fsponge = DefaultHash::new();
         let merlin = self;
 
         TranscriptBuilder::new(fsponge, merlin)
@@ -569,7 +568,7 @@ impl<S: SpongeExt> Merlin<S> {
 
 /// The state of an interactive proof system.
 /// Holds the state of the verifier, and provides the random coins for the prover.
-pub struct Transcript<S: SpongeExt, FS = Sha2Bridge, R = OsRng>
+pub struct Transcript<S: SpongeExt, FS = DefaultHash, R = OsRng>
 where
     FS: SpongeExt<L = u8>,
     R: RngCore + CryptoRng,
@@ -619,3 +618,7 @@ impl Lane for u8 {
         bytes.to_vec()
     }
 }
+
+
+pub type DefaultHash = crate::fs::legacy::Sha2Bridge;
+pub type DefaultTranscript = Transcript<DefaultHash>;
