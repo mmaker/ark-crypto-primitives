@@ -147,9 +147,9 @@
 
 use ark_std::cmp::Ordering;
 use ark_std::collections::VecDeque;
+use ark_std::ops::AddAssign;
 use ark_std::rand::{CryptoRng, RngCore};
 use zeroize::Zeroize;
-use ark_std::ops::AddAssign;
 
 /// Extension for the public-coin transcripts.
 pub mod ark_plugins;
@@ -162,7 +162,9 @@ pub mod sponge;
 /// New implementation of the poseidon sponge function.
 pub mod poseidon_ng;
 
+use crate::fs::legacy::Sha2Bridge;
 use arthur::Arthur;
+use rand::rngs::OsRng;
 
 /// A Lane is the basic unit a sponge function works on.
 /// We need only two things from a lane: the ability to convert it to bytes and back.
@@ -188,7 +190,6 @@ pub trait Sponge {
     /// Securely destroys the sponge and its internal state.
     fn finish(self);
 }
-
 
 /// A builder for tag strings to be used within the SAFE API,
 /// to construct the verifier transcript.
@@ -225,14 +226,13 @@ impl IOPattern {
         Merlin::new(&tag).expect("Internal error. Please submit issue")
     }
 
-    pub fn into_transcript<S, R>(self, csrng: R) -> Transcript<S, S, R>
+    pub fn into_transcript<S>(self) -> Transcript<S>
     where
-        S: SpongeExt<L = u8>,
-        R: RngCore + CryptoRng,
+        S: SpongeExt,
     {
         self.into_merlin()
             .into_transcript()
-            .finalize_with_rng(csrng)
+            .finalize_with_rng(OsRng)
     }
 }
 
@@ -277,7 +277,6 @@ pub trait SpongeExt: Sponge {
     /// and the state holds no information about the elements absorbed so far.
     fn ratchet_unsafe(&mut self) -> &mut Self;
 }
-
 
 /// Invalid IO Pattern.
 ///
@@ -560,8 +559,8 @@ impl<S: SpongeExt> Merlin<S> {
     }
 
     /// Convert this Merlin instance into an Arthur instance.
-    pub fn into_transcript<FS: SpongeExt<L = u8>>(self) -> TranscriptBuilder<S, FS> {
-        let fsponge = FS::new();
+    pub fn into_transcript(self) -> TranscriptBuilder<S, Sha2Bridge> {
+        let fsponge = Sha2Bridge::new();
         let merlin = self;
 
         TranscriptBuilder::new(fsponge, merlin)
@@ -570,13 +569,17 @@ impl<S: SpongeExt> Merlin<S> {
 
 /// The state of an interactive proof system.
 /// Holds the state of the verifier, and provides the random coins for the prover.
-pub struct Transcript<S: SpongeExt, FS: Sponge<L = u8>, R: RngCore + CryptoRng> {
+pub struct Transcript<S: SpongeExt, FS = Sha2Bridge, R = OsRng>
+where
+    FS: SpongeExt<L = u8>,
+    R: RngCore + CryptoRng,
+{
     /// The randomness state of the prover.
     arthur: Arthur<FS, R>,
     merlin: Merlin<S>,
 }
 
-impl<S: SpongeExt, FS: Sponge<L = u8>, R: RngCore + CryptoRng> Transcript<S, FS, R> {
+impl<S: SpongeExt, FS: SpongeExt<L = u8>, R: RngCore + CryptoRng> Transcript<S, FS, R> {
     #[inline]
     pub fn absorb(&mut self, input: &[S::L]) -> Result<&mut Self, InvalidTag> {
         self.merlin.absorb(input)?;
