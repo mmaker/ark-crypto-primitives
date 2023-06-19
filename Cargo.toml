@@ -22,6 +22,8 @@ ark-std = { version = "^0.4.0", default-features = false }
 ark-relations = { version = "^0.4.0", default-features = false }
 ark-serialize = { version = "^0.4.0", default-features = false, features = [ "derive" ] }
 ark-ed-on-bls12-381 = { version = "^0.4.0", default-features = false, features = [ "r1cs" ] }
+keccak = "0.1.4"
+bytemuck = "1.13.1"
 
 blake2 = { version = "0.10", default-features = false }
 sha2 = { version = "0.10", default-features = false }

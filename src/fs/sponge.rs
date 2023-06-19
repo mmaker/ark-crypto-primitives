@@ -20,11 +20,20 @@ pub trait SpongeConfig {
     fn permute(&mut self, state: &mut [Self::L]);
 }
 
+/// A cryptographic sponge.
 pub struct DuplexSponge<C: SpongeConfig> {
     config: C,
     state: Vec<C::L>,
     absorb_pos: usize,
     squeeze_pos: usize,
+}
+
+impl<C: SpongeConfig> Zeroize for DuplexSponge<C> {
+    fn zeroize(&mut self) {
+        self.state.zeroize();
+        self.absorb_pos = 0;
+        self.squeeze_pos = 0;
+    }
 }
 
 impl<L: Lane, C: SpongeConfig<L = L>> Sponge for DuplexSponge<C> {
@@ -73,15 +82,15 @@ impl<L: Lane, C: SpongeConfig<L = L>> Sponge for DuplexSponge<C> {
         self.squeeze_unsafe(&mut output[1..])
     }
 
-    fn finish(mut self) {
-        self.state.zeroize();
-    }
-
     fn from_capacity(input: &[Self::L]) -> Self {
         let mut sponge = Self::new();
         assert_eq!(input.len(), sponge.config.capacity());
         sponge.state[sponge.config.rate()..].copy_from_slice(input);
         sponge
+    }
+
+    fn finish(mut self) {
+        self.state.zeroize();
     }
 }
 

@@ -34,7 +34,7 @@ impl<S: SpongeExt> AbsorbSerializable for Merlin<S> {
 }
 
 impl<S: SpongeExt, FS: SpongeExt<L = u8>, R: RngCore + CryptoRng> AbsorbSerializable
-    for Transcript<S, FS, R>
+    for Transcript<S, R, FS>
 {
     fn absorb_serializable<CS: CanonicalSerialize>(
         &mut self,
@@ -59,8 +59,8 @@ impl<S: SpongeExt> FieldChallenges for Merlin<S> {
     }
 }
 
-impl<S: SpongeExt, FS: SpongeExt<L = u8>, R: RngCore + CryptoRng> FieldChallenges
-    for Transcript<S, FS, R>
+impl<S: SpongeExt, FS: SpongeExt, R: RngCore + CryptoRng> FieldChallenges
+    for Transcript<S, R, FS>
 {
     fn get_field_challenge<F: PrimeField>(&mut self, byte_count: usize) -> Result<F, InvalidTag> {
         self.merlin.get_field_challenge(byte_count)

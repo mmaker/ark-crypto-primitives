@@ -162,6 +162,7 @@ pub mod sponge;
 /// New implementation of the poseidon sponge function.
 pub mod poseidon_ng;
 
+mod keccak;
 use arthur::Arthur;
 use rand::rngs::OsRng;
 
@@ -264,6 +265,11 @@ pub trait SpongeExt: Sponge {
     /// ```
     fn squeeze_bytes_unsafe(&mut self, output: &mut [u8]);
 
+
+    fn absorb_bytes_unsafe(&mut self, input: &[u8]) {
+        self.absorb_unsafe(&Self::L::pack_bytes(input));
+    }
+
     /// Exports the compressed hash state, allowing for preprocessing.
     fn export_unsafe(&self) -> Vec<Self::L>;
 
@@ -309,10 +315,10 @@ enum Op {
     /// In a tag, squeeze is indicated with 'S'.
     Squeeze(usize),
     /// Indicates a ratcheting operation.
-    /// Ratchetng here means setting
+    /// Ratcheting here means setting
     ///  state = H(state)
     /// and absorbing new elements from here.
-    /// More formally, for sponge functions, we squeeze sizeof(capaticy) lanes
+    /// For sponge functions, we squeeze sizeof(capacity) lanes
     /// and initialize a new state filling the capacity.
     /// This allows for a more efficient preprocessing, and for removal of the secrets.
     ///
@@ -487,30 +493,31 @@ impl<S: SpongeExt> Safe<S> {
 }
 
 /// Builder for the prover state.
-pub struct TranscriptBuilder<S: SpongeExt, FS: SpongeExt<L = u8>> {
+pub struct TranscriptBuilder<S: SpongeExt, FS=DefaultHash>
+    where S: SpongeExt, FS: SpongeExt {
     merlin: Merlin<S>,
     fsponge: FS,
 }
 
-impl<S: SpongeExt, FS: SpongeExt<L = u8>> TranscriptBuilder<S, FS> {
+impl<S: SpongeExt, FS: SpongeExt> TranscriptBuilder<S, FS> {
     pub(crate) fn new(mut fsponge: FS, merlin: Merlin<S>) -> Self {
         let merlin_state = merlin.0.sponge.export_unsafe();
         let encoded_state = &<S as Sponge>::L::to_bytes(&merlin_state);
-        fsponge.absorb_unsafe(encoded_state);
+        fsponge.absorb_bytes_unsafe(encoded_state);
         Self { fsponge, merlin }
     }
 
     // rekey the private sponge with some additional secrets (i.e. with the witness)
     // and ratchet
     pub fn rekey(mut self, data: &[u8]) -> Self {
-        self.fsponge.absorb_unsafe(data);
+        self.fsponge.absorb_bytes_unsafe(data);
         self.fsponge.ratchet_unsafe();
         self
     }
 
     // Finalize the state integrating a cryptographically-secure
     // random number generator that will be used to seed the state before future squeezes.
-    pub fn finalize_with_rng<R: RngCore + CryptoRng>(self, csrng: R) -> Transcript<S, FS, R> {
+    pub fn finalize_with_rng<R: RngCore + CryptoRng>(self, csrng: R) -> Transcript<S, R, FS> {
         let arthur = Arthur {
             sponge: self.fsponge,
             csrng,
@@ -568,17 +575,17 @@ impl<S: SpongeExt> Merlin<S> {
 
 /// The state of an interactive proof system.
 /// Holds the state of the verifier, and provides the random coins for the prover.
-pub struct Transcript<S: SpongeExt, FS = DefaultHash, R = OsRng>
+pub struct Transcript<S: SpongeExt, R = DefaultRng, FS = DefaultHash>
 where
-    FS: SpongeExt<L = u8>,
+    FS: SpongeExt,
     R: RngCore + CryptoRng,
 {
     /// The randomness state of the prover.
-    arthur: Arthur<FS, R>,
+    arthur: Arthur<R, FS>,
     merlin: Merlin<S>,
 }
 
-impl<S: SpongeExt, FS: SpongeExt<L = u8>, R: RngCore + CryptoRng> Transcript<S, FS, R> {
+impl<S: SpongeExt, FS: SpongeExt, R: RngCore + CryptoRng> Transcript<S, R, FS> {
     #[inline]
     pub fn absorb(&mut self, input: &[S::L]) -> Result<&mut Self, InvalidTag> {
         self.merlin.absorb(input)?;
@@ -588,7 +595,7 @@ impl<S: SpongeExt, FS: SpongeExt<L = u8>, R: RngCore + CryptoRng> Transcript<S, 
     /// Get a challenge of `count` bytes.
     pub fn challenge_bytes(&mut self, dest: &mut [u8]) -> Result<(), InvalidTag> {
         self.merlin.challenge_bytes(dest)?;
-        self.arthur.sponge.absorb_unsafe(dest);
+        self.arthur.sponge.absorb_bytes_unsafe(dest);
         Ok(())
     }
 
@@ -620,5 +627,8 @@ impl Lane for u8 {
 }
 
 
-pub type DefaultHash = crate::fs::legacy::Sha2Bridge;
+pub type DefaultRng = OsRng;
+pub type DefaultHash = crate::fs::keccak::Keccak;
 pub type DefaultTranscript = Transcript<DefaultHash>;
+
+
