@@ -10,7 +10,7 @@
 use digest::Digest;
 
 use sha2;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use super::{Sponge, SpongeExt};
 
@@ -47,6 +47,20 @@ impl Sha2Bridge {
         mask_squeeze
     };
 }
+impl Zeroize for Sha2Bridge {
+    fn zeroize(&mut self) {
+        self.cv.zeroize();
+        self.hasher.reset();
+    }
+}
+
+impl Drop for Sha2Bridge {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for Sha2Bridge {}
 
 impl Sponge for Sha2Bridge {
     type L = u8;
@@ -125,11 +139,6 @@ impl Sponge for Sha2Bridge {
         } else {
             unreachable!()
         }
-    }
-
-    fn finish(mut self) {
-        self.cv.zeroize();
-        self.hasher.reset();
     }
 }
 

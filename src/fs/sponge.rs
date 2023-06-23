@@ -1,5 +1,5 @@
 use ark_ff::{BigInteger, PrimeField};
-use zeroize::Zeroize;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::{
     fs::{Lane, Sponge, SpongeExt},
@@ -35,6 +35,14 @@ impl<C: SpongeConfig> Zeroize for DuplexSponge<C> {
         self.squeeze_pos = 0;
     }
 }
+
+impl<C: SpongeConfig> Drop for DuplexSponge<C> {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl<C: SpongeConfig> ZeroizeOnDrop for DuplexSponge<C> {}
 
 impl<L: Lane, C: SpongeConfig<L = L>> Sponge for DuplexSponge<C> {
     type L = L;
@@ -87,10 +95,6 @@ impl<L: Lane, C: SpongeConfig<L = L>> Sponge for DuplexSponge<C> {
         assert_eq!(input.len(), sponge.config.capacity());
         sponge.state[sponge.config.rate()..].copy_from_slice(input);
         sponge
-    }
-
-    fn finish(mut self) {
-        self.state.zeroize();
     }
 }
 

@@ -3,7 +3,7 @@
 use core::ops::{Deref, DerefMut};
 
 use keccak;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::fs::SpongeExt;
 
@@ -28,7 +28,7 @@ struct AlignedKeccakState([u8; 200]);
 /// A Strobe context for the 128-bit security level.
 ///
 /// Only `meta-AD`, `AD`, `KEY`, and `PRF` operations are supported.
-#[derive(Clone, Zeroize)]
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct Keccak {
     state: AlignedKeccakState,
     pos: u8,
@@ -90,9 +90,6 @@ impl Sponge for Keccak {
         todo!()
     }
 
-    fn finish(self) {
-        todo!()
-    }
 }
 
 impl Keccak {

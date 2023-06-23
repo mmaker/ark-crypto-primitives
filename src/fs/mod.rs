@@ -8,7 +8,8 @@
 //!
 //! ```rust
 //! use ark_crypto_primitives::fs::{legacy::Sha2Bridge, poseidon_ng::PoseidonSpongeNG};
-//! use ark_crypto_primitives::fs::ark_plugins::{FieldChallenges, RekeySerializable};
+//! use ark_crypto_primitives::fs::ark_plugins::{RekeySerializable};
+//! use ark_crypto_primitives::fs::plugins::FieldChallenges;
 //! use ark_crypto_primitives::fs::{IOPattern, InvalidTag};
 //! use rand::rngs::OsRng;
 //! use ark_ed_on_bls12_381::{Fr, Fq, EdwardsAffine as GG};
@@ -42,7 +43,7 @@
 //!     // Build an RNG that is tied to the protocol transcript,
 //!     // seeding it with the witness (optional) and
 //!     // a cryptographically-secure random number generator.
-//!     let mut transcript = merlin.into_transcript::<Sha2Bridge>()
+//!     let mut transcript = merlin.into_transcript()
 //!         .rekey_serializable(sk)
 //!         .finalize_with_rng(OsRng);
 //!
@@ -58,7 +59,6 @@
 //!     // At any point, the prover can get a csrng from the transcript.
 //!     let response = k + challenge * sk;
 //!     let proof = (challenge, response);
-//!     transcript.finish()?;
 //!     Ok(proof)
 //! }
 //!
@@ -163,6 +163,7 @@ pub mod sponge;
 pub mod poseidon_ng;
 
 mod keccak;
+pub mod plugins;
 use arthur::Arthur;
 use rand::rngs::OsRng;
 
@@ -174,7 +175,7 @@ pub trait Lane: AddAssign + Copy + Default + Sized + Zeroize {
 }
 
 /// A Sponge is a stateful object that can absorb and squeeze data.
-pub trait Sponge {
+pub trait Sponge: Zeroize {
     /// The basic unit that the sponge works with.
     /// Must support packing and unpacking to bytes.
     type L: Lane;
@@ -187,9 +188,9 @@ pub trait Sponge {
     fn squeeze_unsafe(&mut self, output: &mut [Self::L]) -> &mut Self;
     /// Provides access to the internal state of the sponge.
     fn from_capacity(input: &[Self::L]) -> Self;
-    /// Securely destroys the sponge and its internal state.
-    fn finish(self);
 }
+
+
 
 /// A builder for tag strings to be used within the SAFE API,
 /// to construct the verifier transcript.
@@ -481,15 +482,16 @@ impl<S: SpongeExt> Safe<S> {
             Err("Invalid tag".into())
         }
     }
+}
 
-    /// Destroyes the sponge state.
-    pub fn finish(self) -> Result<(), InvalidTag> {
-        if self.stack.is_empty() {
-            Ok(())
-        } else {
-            Err("Tag Mismatch".into())
+impl<S: Sponge> Drop for Safe<S> {
+        /// Destroyes the sponge state.
+        fn drop(&mut self) {
+            if !self.stack.is_empty() {
+                panic!("Invalid tag. Remaining operations: {:?}", self.stack);
+            }
+            self.sponge.zeroize();
         }
-    }
 }
 
 /// Builder for the prover state.
@@ -556,10 +558,6 @@ impl<S: SpongeExt> Merlin<S> {
         Ok(self.0.sponge.export_unsafe())
     }
 
-    pub fn finish(self) -> Result<(), InvalidTag> {
-        self.0.finish()
-    }
-
     pub fn challenge_bytes(&mut self, mut dest: &mut [u8]) -> Result<(), InvalidTag> {
         self.0.squeeze(&mut dest)
     }
@@ -610,10 +608,7 @@ impl<S: SpongeExt, FS: SpongeExt, R: RngCore + CryptoRng> Transcript<S, R, FS> {
         &mut self.arthur
     }
 
-    pub fn finish(self) -> Result<(), InvalidTag> {
-        self.arthur.sponge.finish();
-        self.merlin.finish()
-    }
+    // XXX. implement drop for more helpful error messages.
 }
 
 impl Lane for u8 {
