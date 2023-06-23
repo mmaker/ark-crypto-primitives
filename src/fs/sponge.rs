@@ -148,8 +148,9 @@ macro_rules! impl_lane {
     };
 }
 
-use ark_ed_on_bls12_381::Fq;
+use ark_ed_on_bls12_381::{Fq, Fr};
 impl_lane!(Fq);
+impl_lane!(Fr);
 
 impl crate::sponge::poseidon::PoseidonDefaultConfigField for Fq {
     fn get_default_poseidon_parameters(

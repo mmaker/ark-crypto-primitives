@@ -3,7 +3,7 @@ use ark_serialize::CanonicalSerialize;
 use ark_std::rand::{CryptoRng, RngCore};
 
 use super::{InvalidTag, Lane, Transcript, TranscriptBuilder};
-use super::{Merlin, SpongeExt};
+use super::{IOPattern, Merlin, SpongeExt};
 
 pub trait FieldChallenges {
     fn get_field_challenge<F: PrimeField>(&mut self, byte_count: usize) -> Result<F, InvalidTag>;
@@ -18,6 +18,16 @@ pub trait AbsorbSerializable {
 
 pub trait RekeySerializable {
     fn rekey_serializable<S: CanonicalSerialize>(self, input: S) -> Self;
+}
+
+pub trait IOPatternSerializable {
+    fn absorb_serializable<S: CanonicalSerialize + Default>(self, count: usize) -> Self;
+}
+
+impl IOPatternSerializable for IOPattern {
+    fn absorb_serializable<S: CanonicalSerialize + Default>(self, count: usize) -> Self {
+        self.absorb(S::default().compressed_size() * count)
+    }
 }
 
 impl<S: SpongeExt> AbsorbSerializable for Merlin<S> {
@@ -74,3 +84,5 @@ impl<S: SpongeExt, FS: SpongeExt<L = u8>> RekeySerializable for TranscriptBuilde
         self.rekey(writer.as_slice())
     }
 }
+
+

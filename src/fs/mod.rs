@@ -436,7 +436,7 @@ impl<S: SpongeExt> Safe<S> {
     /// Perform secure absorption of the elements in `input`.
     /// Absorb calls can be batched together, or provided separately for streaming-friendly protocols.
     pub fn absorb(&mut self, input: &[S::L]) -> Result<&mut Self, InvalidTag> {
-        let op = self.stack.pop_front().unwrap();
+        let op = self.stack.pop_front().ok_or::<InvalidTag>("Stack is already empty".into())?;
         if let Op::Absorb(length) = op {
             match length.cmp(&input.len()) {
                 Ordering::Less => {
