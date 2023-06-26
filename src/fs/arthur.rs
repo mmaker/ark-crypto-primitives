@@ -1,15 +1,16 @@
 use rand::{CryptoRng, RngCore};
 
-use super::{DefaultHash, DefaultRng, InvalidTag, Merlin, SpongeExt, IOPattern};
+use super::{DefaultRng, InvalidTag, Merlin, SpongeExt, IOPattern, Sponge};
+use super::keccak::Keccak;
 
 // Arthur is a cryptographically-secure random number generator that is
 // seeded by a random-number generator and is bound to the protocol transcript.
-pub(crate) struct Arthur<R: RngCore + CryptoRng, FS: SpongeExt> {
-    pub(crate) sponge: FS,
+pub(crate) struct Arthur<R: RngCore + CryptoRng> {
+    pub(crate) sponge: Keccak,
     pub(crate) csrng: R,
 }
 
-impl<FS: SpongeExt, R: RngCore + CryptoRng> RngCore for Arthur<R, FS> {
+impl<R: RngCore + CryptoRng> RngCore for Arthur<R> {
     fn next_u32(&mut self) -> u32 {
         let mut buf = [0u8; 4];
         self.fill_bytes(buf.as_mut());
@@ -24,31 +25,30 @@ impl<FS: SpongeExt, R: RngCore + CryptoRng> RngCore for Arthur<R, FS> {
 
     fn fill_bytes(&mut self, dest: &mut [u8]) {
         self.csrng.fill_bytes(dest);
-        self.sponge.absorb_bytes_unsafe(dest);
-        self.sponge.squeeze_bytes_unsafe(dest);
+        self.sponge.absorb_unsafe(dest);
+        self.sponge.squeeze_unsafe(dest);
     }
 
     fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), ark_std::rand::Error> {
-        self.sponge.squeeze_bytes_unsafe(dest);
+        self.sponge.squeeze_unsafe(dest);
         Ok(())
     }
 }
 
 /// Builder for the prover state.
-pub struct TranscriptBuilder<S: SpongeExt, FS = DefaultHash>
+pub struct TranscriptBuilder<S: SpongeExt>
 where
     S: SpongeExt,
-    FS: SpongeExt,
 {
     merlin: Merlin<S>,
-    fsponge: FS,
+    fsponge: Keccak,
 }
 
-impl<S: SpongeExt, FS: SpongeExt> TranscriptBuilder<S, FS> {
+impl<S: SpongeExt> TranscriptBuilder<S> {
     pub(crate) fn new(io_pattern: &IOPattern) -> Self {
         let merlin = Merlin::new(io_pattern);
 
-        let mut fsponge = FS::new();
+        let mut fsponge = Keccak::new();
         fsponge.absorb_bytes_unsafe(io_pattern.as_bytes());
 
         Self { fsponge, merlin }
@@ -57,14 +57,14 @@ impl<S: SpongeExt, FS: SpongeExt> TranscriptBuilder<S, FS> {
     // rekey the private sponge with some additional secrets (i.e. with the witness)
     // and ratchet
     pub fn rekey(mut self, data: &[u8]) -> Self {
-        self.fsponge.absorb_bytes_unsafe(data);
+        self.fsponge.absorb_unsafe(data);
         self.fsponge.ratchet_unsafe();
         self
     }
 
     // Finalize the state integrating a cryptographically-secure
     // random number generator that will be used to seed the state before future squeezes.
-    pub fn finalize_with_rng<R: RngCore + CryptoRng>(self, csrng: R) -> Transcript<S, R, FS> {
+    pub fn finalize_with_rng<R: RngCore + CryptoRng>(self, csrng: R) -> Transcript<S, R> {
         let arthur = Arthur {
             sponge: self.fsponge,
             csrng,
@@ -87,17 +87,17 @@ impl<S: SpongeExt> From<&IOPattern> for Transcript<S> {
 
 /// The state of an interactive proof system.
 /// Holds the state of the verifier, and provides the random coins for the prover.
-pub struct Transcript<S: SpongeExt, R = DefaultRng, FS = DefaultHash>
+pub struct Transcript<S, R = DefaultRng>
 where
-    FS: SpongeExt,
+    S: SpongeExt,
     R: RngCore + CryptoRng,
 {
     /// The randomness state of the prover.
-    pub(crate) arthur: Arthur<R, FS>,
+    pub(crate) arthur: Arthur<R>,
     pub(crate) merlin: Merlin<S>,
 }
 
-impl<S: SpongeExt, FS: SpongeExt, R: RngCore + CryptoRng> Transcript<S, R, FS> {
+impl<S: SpongeExt, R: RngCore + CryptoRng> Transcript<S, R> {
     #[inline]
     pub fn absorb(&mut self, input: &[S::L]) -> Result<&mut Self, InvalidTag> {
         self.merlin.absorb(input)?;
@@ -121,9 +121,7 @@ impl<S: SpongeExt, FS: SpongeExt, R: RngCore + CryptoRng> Transcript<S, R, FS> {
     pub fn rng<'a>(&'a mut self) -> &'a mut (impl CryptoRng + RngCore) {
         &mut self.arthur
     }
-
-    // XXX. implement drop for more helpful error messages.
 }
 
-impl<FS: SpongeExt, R: RngCore + CryptoRng> CryptoRng for Arthur<R, FS> {}
+impl<R: RngCore + CryptoRng> CryptoRng for Arthur<R> {}
 

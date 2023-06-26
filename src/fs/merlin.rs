@@ -28,6 +28,10 @@ impl<S: SpongeExt> Merlin<S> {
     pub fn challenge_bytes(&mut self, mut dest: &mut [u8]) -> Result<(), InvalidTag> {
         self.0.squeeze(&mut dest)
     }
+
+    // pub fn challenge(&mut self, mut dest: &mut [S::L]) -> Result<(), InvalidTag> {
+    //     self.0.squeeze(&mut dest)
+    // }
 }
 
 

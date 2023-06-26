@@ -56,7 +56,6 @@
 //!
 //!     // Get a challenge of 16 bytes and map it into the field Fr.
 //!     let challenge = transcript.get_field_challenge::<Fr>(16)?;
-//!     // At any point, the prover can get a csrng from the transcript.
 //!     let response = k + challenge * sk;
 //!     let proof = (challenge, response);
 //!     Ok(proof)
