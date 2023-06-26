@@ -41,24 +41,24 @@ where
     S: SpongeExt,
 {
     merlin: Merlin<S>,
-    fsponge: Keccak,
+    u8sponge: Keccak,
 }
 
 impl<S: SpongeExt> TranscriptBuilder<S> {
     pub(crate) fn new(io_pattern: &IOPattern) -> Self {
         let merlin = Merlin::new(io_pattern);
 
-        let mut fsponge = Keccak::new();
-        fsponge.absorb_bytes_unsafe(io_pattern.as_bytes());
+        let mut u8sponge = Keccak::new();
+        u8sponge.absorb_bytes_unsafe(io_pattern.as_bytes());
 
-        Self { fsponge, merlin }
+        Self { u8sponge, merlin }
     }
 
     // rekey the private sponge with some additional secrets (i.e. with the witness)
     // and ratchet
     pub fn rekey(mut self, data: &[u8]) -> Self {
-        self.fsponge.absorb_unsafe(data);
-        self.fsponge.ratchet_unsafe();
+        self.u8sponge.absorb_unsafe(data);
+        self.u8sponge.ratchet_unsafe();
         self
     }
 
@@ -66,7 +66,7 @@ impl<S: SpongeExt> TranscriptBuilder<S> {
     // random number generator that will be used to seed the state before future squeezes.
     pub fn finalize_with_rng<R: RngCore + CryptoRng>(self, csrng: R) -> Transcript<S, R> {
         let arthur = Arthur {
-            sponge: self.fsponge,
+            sponge: self.u8sponge,
             csrng,
         };
 
@@ -107,7 +107,7 @@ impl<S: SpongeExt, R: RngCore + CryptoRng> Transcript<S, R> {
     /// Get a challenge of `count` bytes.
     pub fn challenge_bytes(&mut self, dest: &mut [u8]) -> Result<(), InvalidTag> {
         self.merlin.challenge_bytes(dest)?;
-        self.arthur.sponge.absorb_bytes_unsafe(dest);
+        self.arthur.sponge.absorb_unsafe(dest);
         Ok(())
     }
 
