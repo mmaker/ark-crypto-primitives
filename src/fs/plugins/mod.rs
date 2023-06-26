@@ -1,6 +1,5 @@
-
-mod field_challenges;
 mod absorb_points;
+mod field_challenges;
 
-pub use field_challenges::FieldChallenges;
 pub use absorb_points::AbsorbPoint;
+pub use field_challenges::FieldChallenges;

@@ -6,15 +6,11 @@ pub trait FieldChallenges {
     fn get_field_challenge<F: PrimeField>(&mut self, byte_count: usize) -> Result<F, InvalidTag>;
 }
 
-
-impl<S: SpongeExt, FS: SpongeExt, R: RngCore + CryptoRng> FieldChallenges
-    for Transcript<S, R, FS>
-{
+impl<S: SpongeExt, FS: SpongeExt, R: RngCore + CryptoRng> FieldChallenges for Transcript<S, R, FS> {
     fn get_field_challenge<F: PrimeField>(&mut self, byte_count: usize) -> Result<F, InvalidTag> {
         self.merlin.get_field_challenge(byte_count)
     }
 }
-
 
 impl<S: SpongeExt> FieldChallenges for Merlin<S> {
     /// Get a field element challenge from the protocol transcript.
@@ -29,4 +25,3 @@ impl<S: SpongeExt> FieldChallenges for Merlin<S> {
         Ok(F::from_le_bytes_mod_order(&chal))
     }
 }
-

@@ -1,6 +1,6 @@
-use ark_std::rand::{CryptoRng, RngCore};
+use rand::{CryptoRng, RngCore};
 
-use super::SpongeExt;
+use super::{DefaultHash, DefaultRng, InvalidTag, Merlin, SpongeExt};
 
 // Arthur is a cryptographically-secure random number generator that is
 // seeded by a random-number generator and is bound to the protocol transcript.
@@ -34,4 +34,88 @@ impl<FS: SpongeExt, R: RngCore + CryptoRng> RngCore for Arthur<R, FS> {
     }
 }
 
+/// Builder for the prover state.
+pub struct TranscriptBuilder<S: SpongeExt, FS = DefaultHash>
+where
+    S: SpongeExt,
+    FS: SpongeExt,
+{
+    merlin: Merlin<S>,
+    fsponge: FS,
+}
+
+impl<S: SpongeExt, FS: SpongeExt> TranscriptBuilder<S, FS> {
+    pub(crate) fn new(tag: &str) -> Self {
+        let merlin = Merlin::new(tag).expect("Invalid tag");
+
+        let mut fsponge = FS::new();
+        fsponge.absorb_bytes_unsafe(tag.as_bytes());
+
+        Self { fsponge, merlin }
+    }
+
+    // rekey the private sponge with some additional secrets (i.e. with the witness)
+    // and ratchet
+    pub fn rekey(mut self, data: &[u8]) -> Self {
+        self.fsponge.absorb_bytes_unsafe(data);
+        self.fsponge.ratchet_unsafe();
+        self
+    }
+
+    // Finalize the state integrating a cryptographically-secure
+    // random number generator that will be used to seed the state before future squeezes.
+    pub fn finalize_with_rng<R: RngCore + CryptoRng>(self, csrng: R) -> Transcript<S, R, FS> {
+        let arthur = Arthur {
+            sponge: self.fsponge,
+            csrng,
+        };
+
+        Transcript {
+            merlin: self.merlin,
+            arthur,
+        }
+    }
+}
+
+/// The state of an interactive proof system.
+/// Holds the state of the verifier, and provides the random coins for the prover.
+pub struct Transcript<S: SpongeExt, R = DefaultRng, FS = DefaultHash>
+where
+    FS: SpongeExt,
+    R: RngCore + CryptoRng,
+{
+    /// The randomness state of the prover.
+    pub(crate) arthur: Arthur<R, FS>,
+    pub(crate) merlin: Merlin<S>,
+}
+
+impl<S: SpongeExt, FS: SpongeExt, R: RngCore + CryptoRng> Transcript<S, R, FS> {
+    #[inline]
+    pub fn absorb(&mut self, input: &[S::L]) -> Result<&mut Self, InvalidTag> {
+        self.merlin.absorb(input)?;
+        Ok(self)
+    }
+
+    /// Get a challenge of `count` bytes.
+    pub fn challenge_bytes(&mut self, dest: &mut [u8]) -> Result<(), InvalidTag> {
+        self.merlin.challenge_bytes(dest)?;
+        self.arthur.sponge.absorb_bytes_unsafe(dest);
+        Ok(())
+    }
+
+    #[inline]
+    pub fn ratchet(&mut self) -> Result<&mut Self, InvalidTag> {
+        self.merlin.ratchet()?;
+        Ok(self)
+    }
+
+    #[inline]
+    pub fn rng<'a>(&'a mut self) -> &'a mut (impl CryptoRng + RngCore) {
+        &mut self.arthur
+    }
+
+    // XXX. implement drop for more helpful error messages.
+}
+
 impl<FS: SpongeExt, R: RngCore + CryptoRng> CryptoRng for Arthur<R, FS> {}
+

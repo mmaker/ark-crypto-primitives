@@ -1,15 +1,24 @@
-use ark_ff::{BigInteger, PrimeField};
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::Zeroize;
 
-use crate::{
-    fs::{Lane, Sponge, SpongeExt},
-    sponge::poseidon::PoseidonConfig,
-};
-use ark_std::Zero;
+use super::lane::Lane;
+
+/// A Sponge is a stateful object that can absorb and squeeze data.
+pub trait Sponge: Zeroize {
+    /// The basic unit that the sponge works with.
+    /// Must support packing and unpacking to bytes.
+    type L: Lane;
+
+    /// Initializes a new sponge, setting up the state.
+    fn new() -> Self;
+    /// Absorbs new elements in the sponge.
+    fn absorb_unsafe(&mut self, input: &[Self::L]) -> &mut Self;
+    /// Squeezes out new elements.
+    fn squeeze_unsafe(&mut self, output: &mut [Self::L]) -> &mut Self;
+    /// Provides access to the internal state of the sponge.
+    fn from_capacity(input: &[Self::L]) -> Self;
+}
 
 /// A sponge configuration.
-///
-///
 pub trait SpongeConfig {
     // the lane requirement here is not really needed
     type L: Lane;
@@ -20,173 +29,48 @@ pub trait SpongeConfig {
     fn permute(&mut self, state: &mut [Self::L]);
 }
 
-/// A cryptographic sponge.
-pub struct DuplexSponge<C: SpongeConfig> {
-    config: C,
-    state: Vec<C::L>,
-    absorb_pos: usize,
-    squeeze_pos: usize,
-}
+/// A [`crate::fs::SpongeExt`] additionally provides
+/// squeezing uniformly-random bytes and ratcheting.
+/// While squeezing bytes is natural for common cryptographic sponges,
+/// this operation is non-trivial for algebraic hashes: there is no guarantee that the output
+/// $\pmod p$ is uniformly distributed over $2^{\lfloor log p\rfloor}$.
+pub trait SpongeExt: Sponge {
+    /// Squeeze bytes from the sponge.
+    ///
+    /// While this function is trivial for byte-oriented hashes,
+    /// for algebraic hashes, it requires proper implementation.
+    /// Many implementations simply truncate the least-significant bits, but this approach
+    /// results in a statistical deviation from uniform randomness. The number of useful bits, denoted as `n`,
+    /// has a statistical distance from uniformly random given by:
+    ///
+    /// ```text
+    /// (2 * (p % 2^n) / 2^n) * (1 - (p % 2^n) / p)
+    /// ```
+    ///
+    /// To determine the value of 'n' suitable for cryptographic operations, use the following function:
+    ///
+    /// ```python
+    /// def useful_bits(p):
+    ///     for n in range(p.bit_length()-1, 0, -1):
+    ///         alpha = p % 2^n
+    ///         if n+1 + p.bit_length() - alpha.bit_length() - (2^n-alpha).bit_length() >= 128:
+    ///             return n
+    /// ```
+    fn squeeze_bytes_unsafe(&mut self, output: &mut [u8]);
 
-impl<C: SpongeConfig> Zeroize for DuplexSponge<C> {
-    fn zeroize(&mut self) {
-        self.state.zeroize();
-        self.absorb_pos = 0;
-        self.squeeze_pos = 0;
-    }
-}
-
-impl<C: SpongeConfig> Drop for DuplexSponge<C> {
-    fn drop(&mut self) {
-        self.zeroize();
-    }
-}
-
-impl<C: SpongeConfig> ZeroizeOnDrop for DuplexSponge<C> {}
-
-impl<L: Lane, C: SpongeConfig<L = L>> Sponge for DuplexSponge<C> {
-    type L = L;
-
-    fn new() -> Self {
-        let config = C::new();
-        let state = vec![Self::L::default(); config.capacity() + config.rate()];
-        Self {
-            config,
-            state,
-            absorb_pos: 0,
-            squeeze_pos: 0,
-        }
+    fn absorb_bytes_unsafe(&mut self, input: &[u8]) {
+        self.absorb_unsafe(&Self::L::pack_bytes(input));
     }
 
-    fn absorb_unsafe(&mut self, input: &[Self::L]) -> &mut Self {
-        if input.len() == 0 {
-            self.squeeze_pos = self.config.rate();
-            self
-        } else if self.absorb_pos == self.config.rate() {
-            self.config.permute(&mut self.state);
-            self.absorb_pos = 0;
-            self
-        } else {
-            // XXX. maybe we should absorb in overwrite mode?
-            self.state[self.absorb_pos] += input[0];
-            self.absorb_pos += 1;
-            self.absorb_unsafe(&input[1..])
-        }
-    }
+    /// Exports the compressed hash state, allowing for preprocessing.
+    fn export_unsafe(&self) -> Vec<Self::L>;
 
-    fn squeeze_unsafe(&mut self, output: &mut [Self::L]) -> &mut Self {
-        if output.len() == 0 {
-            return self;
-        }
-
-        if self.squeeze_pos == self.config.rate() {
-            self.squeeze_pos = 0;
-            self.absorb_pos = 0;
-            self.config.permute(&mut self.state);
-        }
-
-        output[0] = self.state[self.squeeze_pos];
-        self.squeeze_pos += 1;
-        self.squeeze_unsafe(&mut output[1..])
-    }
-
-    fn from_capacity(input: &[Self::L]) -> Self {
-        let mut sponge = Self::new();
-        assert_eq!(input.len(), sponge.config.capacity());
-        sponge.state[sponge.config.rate()..].copy_from_slice(input);
-        sponge
-    }
-}
-
-impl<F: Lane + PrimeField, C: SpongeConfig<L = F>> SpongeExt for DuplexSponge<C> {
-    fn squeeze_bytes_unsafe(&mut self, output: &mut [u8]) {
-        // obtained with the above function
-        let n = 251 / 8;
-        let len = (output.len() + n - 1) / n;
-        let mut buf = vec![Self::L::zero(); len];
-        self.squeeze_unsafe(buf.as_mut_slice());
-        for i in 0..len - 1 {
-            output[i * n..(i + 1) * n].copy_from_slice(&buf[i].into_bigint().to_bytes_le()[..n]);
-        }
-        let remainder = output.len() % n;
-        output[n * (len - 1)..]
-            .copy_from_slice(&buf[len - 1].into_bigint().to_bytes_le()[..remainder]);
-    }
-
-    fn export_unsafe(&self) -> Vec<Self::L> {
-        // XXX. double-check this
-        self.state.to_vec()
-    }
-
-    fn ratchet_unsafe(&mut self) -> &mut Self {
-        self.config.permute(self.state.as_mut_slice());
-        // set to zero the state up to rate
-        self.state[..self.config.rate()]
-            .iter_mut()
-            .for_each(|x| *x = F::zero());
-        self
-    }
-}
-
-macro_rules! impl_lane {
-    ($t:ident) => {
-        impl Lane for $t {
-            fn to_bytes(a: &[Self]) -> Vec<u8> {
-                a.iter()
-                    .map(|x| x.into_bigint().to_bytes_be())
-                    .flatten()
-                    .collect()
-            }
-
-            fn pack_bytes(bytes: &[u8]) -> Vec<Self> {
-                use ark_ff::Field;
-
-                let n = 2;
-                let mut packed = Vec::new();
-                for chunk in bytes.chunks(n) {
-                    packed.push(Self::from_random_bytes(chunk).unwrap());
-                }
-                packed
-            }
-        }
-    };
-}
-
-use ark_ed_on_bls12_381::{Fq, Fr};
-impl_lane!(Fq);
-impl_lane!(Fr);
-
-impl crate::sponge::poseidon::PoseidonDefaultConfigField for Fq {
-    fn get_default_poseidon_parameters(
-        _rate: usize,
-        _optimized_for_weights: bool,
-    ) -> Option<crate::sponge::poseidon::PoseidonConfig<Self>> {
-        use ark_std::{test_rng, UniformRand};
-
-        let mut test_rng = test_rng();
-
-        let mut mds = vec![vec![]; 3];
-        for i in 0..3 {
-            for _ in 0..3 {
-                mds[i].push(Fq::rand(&mut test_rng));
-            }
-        }
-
-        let mut ark = vec![vec![]; 8 + 24];
-        for i in 0..8 + 24 {
-            for _ in 0..3 {
-                ark[i].push(Fq::rand(&mut test_rng));
-            }
-        }
-
-        let mut test_a = Vec::new();
-        let mut test_b = Vec::new();
-        for _ in 0..3 {
-            test_a.push(Fq::rand(&mut test_rng));
-            test_b.push(Fq::rand(&mut test_rng));
-        }
-
-        let params = PoseidonConfig::<Fq>::new(8, 24, 31, mds, ark, 2, 1);
-        Some(params)
-    }
+    /// Ratcheting.
+    ///
+    /// This operation consists in:
+    /// - permute the state.
+    /// - set the rate to zero.
+    /// This has the effect that the state is compressed
+    /// and the state holds no information about the elements absorbed so far.
+    fn ratchet_unsafe(&mut self) -> &mut Self;
 }

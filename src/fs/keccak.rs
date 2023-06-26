@@ -12,7 +12,6 @@ use super::Sponge;
 /// Strobe R value; security level 128 is hardcoded
 const STROBE_R: u8 = 166;
 
-
 fn transmute_state(st: &mut AlignedKeccakState) -> &mut [u64; 25] {
     unsafe { &mut *(st as *mut AlignedKeccakState as *mut [u64; 25]) }
 }
@@ -20,8 +19,7 @@ fn transmute_state(st: &mut AlignedKeccakState) -> &mut [u64; 25] {
 /// This is a wrapper around 200-byte buffer that's always 8-byte aligned
 /// to make pointers to it safely convertible to pointers to [u64; 25]
 /// (since u64 words must be 8-byte aligned)
-#[derive(Clone, Zeroize)]
-#[zeroize(drop)]
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
 #[repr(align(8))]
 struct AlignedKeccakState([u8; 200]);
 
@@ -89,7 +87,6 @@ impl Sponge for Keccak {
     fn from_capacity(_input: &[Self::L]) -> Self {
         todo!()
     }
-
 }
 
 impl Keccak {
@@ -101,8 +98,6 @@ impl Keccak {
         self.pos = 0;
         self.pos_begin = 0;
     }
-
-
 }
 
 impl Deref for AlignedKeccakState {
@@ -119,9 +114,8 @@ impl DerefMut for AlignedKeccakState {
     }
 }
 
-
 impl SpongeExt for Keccak {
-    fn absorb_bytes_unsafe(&mut self, input: &[u8])  {
+    fn absorb_bytes_unsafe(&mut self, input: &[u8]) {
         self.absorb_unsafe(input);
     }
 
