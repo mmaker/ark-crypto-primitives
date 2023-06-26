@@ -115,6 +115,8 @@ impl DerefMut for AlignedKeccakState {
 }
 
 impl SpongeExt for Keccak {
+    const N: usize = STROBE_R as usize;
+
     fn absorb_bytes_unsafe(&mut self, input: &[u8]) {
         self.absorb_unsafe(input);
     }

@@ -143,6 +143,8 @@ impl Sponge for Sha2Bridge {
 }
 
 impl SpongeExt for Sha2Bridge {
+    const N: usize = Self::DIGEST_SIZE;
+
     fn squeeze_bytes_unsafe(&mut self, output: &mut [u8]) {
         self.squeeze_unsafe(output);
     }

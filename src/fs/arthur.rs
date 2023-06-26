@@ -1,6 +1,6 @@
 use rand::{CryptoRng, RngCore};
 
-use super::{DefaultHash, DefaultRng, InvalidTag, Merlin, SpongeExt};
+use super::{DefaultHash, DefaultRng, InvalidTag, Merlin, SpongeExt, IOPattern};
 
 // Arthur is a cryptographically-secure random number generator that is
 // seeded by a random-number generator and is bound to the protocol transcript.
@@ -45,11 +45,11 @@ where
 }
 
 impl<S: SpongeExt, FS: SpongeExt> TranscriptBuilder<S, FS> {
-    pub(crate) fn new(tag: &str) -> Self {
-        let merlin = Merlin::new(tag).expect("Invalid tag");
+    pub(crate) fn new(io_pattern: &IOPattern) -> Self {
+        let merlin = Merlin::new(io_pattern);
 
         let mut fsponge = FS::new();
-        fsponge.absorb_bytes_unsafe(tag.as_bytes());
+        fsponge.absorb_bytes_unsafe(io_pattern.as_bytes());
 
         Self { fsponge, merlin }
     }
@@ -74,6 +74,14 @@ impl<S: SpongeExt, FS: SpongeExt> TranscriptBuilder<S, FS> {
             merlin: self.merlin,
             arthur,
         }
+    }
+}
+
+
+impl<S: SpongeExt> From<&IOPattern> for Transcript<S> {
+    fn from(pattern: &IOPattern) -> Self {
+        TranscriptBuilder::new(&pattern)
+            .finalize_with_rng(DefaultRng::default())
     }
 }
 

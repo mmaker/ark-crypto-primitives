@@ -18,16 +18,6 @@ pub trait Sponge: Zeroize {
     fn from_capacity(input: &[Self::L]) -> Self;
 }
 
-/// A sponge configuration.
-pub trait SpongeConfig {
-    // the lane requirement here is not really needed
-    type L: Lane;
-
-    fn new() -> Self;
-    fn capacity(&self) -> usize;
-    fn rate(&self) -> usize;
-    fn permute(&mut self, state: &mut [Self::L]);
-}
 
 /// A [`crate::fs::SpongeExt`] additionally provides
 /// squeezing uniformly-random bytes and ratcheting.
@@ -35,6 +25,8 @@ pub trait SpongeConfig {
 /// this operation is non-trivial for algebraic hashes: there is no guarantee that the output
 /// $\pmod p$ is uniformly distributed over $2^{\lfloor log p\rfloor}$.
 pub trait SpongeExt: Sponge {
+
+    const N: usize;
     /// Squeeze bytes from the sponge.
     ///
     /// While this function is trivial for byte-oriented hashes,

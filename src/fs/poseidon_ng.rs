@@ -1,14 +1,14 @@
-use super::{sponge::SpongeConfig, Lane};
+use super::{DuplexSponge, SpongeConfig, Lane};
 use crate::sponge::{
     poseidon::{PoseidonConfig, PoseidonDefaultConfigField, PoseidonSponge},
     CryptographicSponge,
 };
 
-use super::duplex::DuplexSponge;
 use ark_std::UniformRand;
 
 impl<F: Lane + PoseidonDefaultConfigField> SpongeConfig for PoseidonSponge<F> {
     type L = F;
+    const N: usize = 10;
 
     fn new() -> Self {
         let config = F::get_default_poseidon_parameters(10, false).unwrap();
