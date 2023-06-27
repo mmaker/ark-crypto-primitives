@@ -1,4 +1,5 @@
 use super::{safe::IOPattern, InvalidTag, Safe, Sponge};
+use core::borrow::Borrow;
 
 /// Merlin is wrapper around a sponge that provides a secure
 /// Fiat-Shamir implementation for public-coin protocols.
@@ -35,8 +36,8 @@ impl<S: Sponge> Merlin<S> {
 }
 
 
-impl<S: Sponge> From<&IOPattern> for Merlin<S> {
-    fn from(io_pattern: &IOPattern) -> Self {
-        Merlin::new(&io_pattern)
+impl<S: Sponge, B: Borrow<IOPattern>> From<B> for Merlin<S> {
+    fn from(io_pattern: B) -> Self {
+        Merlin::new(io_pattern.borrow())
     }
 }

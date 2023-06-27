@@ -4,14 +4,14 @@ use zeroize::Zeroize;
 /// A Lane is the basic unit a sponge function works on.
 /// We need only two things from a lane: the ability to convert it to bytes and back.
 pub trait Lane: AddAssign + Copy + Default + Sized + Zeroize {
-    fn random_byte_size() -> usize;
+    fn random_bytes_size() -> usize;
     fn fill_bytes(a: &[Self], dst: &mut [u8]);
     fn pack_bytes(bytes: &[u8]) -> Vec<Self>;
 }
 
 impl Lane for u8 {
 
-    fn random_byte_size() -> usize {
+    fn random_bytes_size() -> usize {
         1
     }
 
@@ -28,21 +28,20 @@ macro_rules! impl_lane {
     ($t:ty, $n: expr) => {
         impl Lane for $t {
 
-            fn random_byte_size() -> usize {
+            fn random_bytes_size() -> usize {
                 $n
             }
 
             fn fill_bytes(a: &[Self], dst: &mut [u8]) {
                 use ark_ff::{BigInteger, PrimeField};
 
-                let length = usize::min(Self::random_byte_size(), dst.len());
+                let length = usize::min(Self::random_bytes_size(), dst.len());
                 let bytes = a[0].into_bigint().to_bytes_le();
                 dst[..length].copy_from_slice(&bytes[..length]);
 
                 if dst.len() > length {
                     Self::fill_bytes(&a[1..], &mut dst[length..]);
                 }
-
             }
 
             fn pack_bytes(bytes: &[u8]) -> Vec<Self> {

@@ -1,6 +1,7 @@
-use crate::fs::{InvalidTag, Lane, Merlin, Sponge};
+use crate::fs::{InvalidTag, Lane, Merlin, Sponge, Transcript};
 use ark_ec::AffineRepr;
 use ark_ff::Field;
+use rand::{RngCore, CryptoRng};
 
 pub trait AbsorbPoint {
     type F;
@@ -9,6 +10,7 @@ pub trait AbsorbPoint {
         input: &[A],
     ) -> Result<&mut Self, InvalidTag>;
 }
+
 
 impl<S> AbsorbPoint for Merlin<S>
 where
@@ -26,4 +28,22 @@ where
         }
         self.absorb(S::L::pack_bytes(&buf).as_slice())
     }
+}
+
+impl<S, R> AbsorbPoint for Transcript<S, R>
+where
+    S: Sponge,
+    S::L: Field,
+    R: RngCore + CryptoRng,
+{
+    type F = S::L;
+
+    fn absorb_points<A: AffineRepr<BaseField = Self::F>>(
+            &mut self,
+            input: &[A],
+        ) -> Result<&mut Self, InvalidTag> {
+        self.merlin.absorb_points(input)?;
+        Ok(self)
+    }
+
 }

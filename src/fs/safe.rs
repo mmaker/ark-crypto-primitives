@@ -2,7 +2,11 @@
 use super::{InvalidTag, Lane, Sponge};
 use ark_std::collections::VecDeque;
 use ::core::cmp::Ordering;
-use ::core::num::NonZeroUsize;
+
+// XXX. before, absorb and squeeze were accepting arguments of type
+// use ::core::num::NonZeroUsize;
+// which was imposing a bit of a burden on the user side into casting the type.
+// (plain integers don't cast to NonZeroUsize automatically)
 
 
 macro_rules! ceil {
@@ -63,11 +67,15 @@ impl IOPattern {
         Self(tag_base)
     }
 
-    pub fn absorb(self, count: NonZeroUsize) -> Self {
+    pub fn absorb(self, count: usize) -> Self {
+        assert!(count > 0, "Count must be positive");
+
         Self(self.0 + &format!("A{}", count))
     }
 
-    pub fn squeeze(self, count: NonZeroUsize) -> Self {
+    pub fn squeeze(self, count: usize) -> Self {
+        assert!(count > 0, "Count must be positive");
+
         Self(self.0 + &format!("S{}", count))
     }
 
@@ -121,7 +129,7 @@ impl<S: Sponge> Safe<S> {
 
         // consecutive calls are merged into one
         match stack.pop_front() {
-            None => Ok(VecDeque::new()),
+            None => Ok(stack),
             Some(x) => Self::simplify_stack(VecDeque::from([x]), stack),
         }
     }
@@ -244,7 +252,7 @@ impl<S: Sponge> Safe<S> {
 
         match op {
             Op::Squeeze(length)  => {
-                let squeeze_len = ceil!(length, S::L::random_byte_size());
+                let squeeze_len = ceil!(length, S::L::random_bytes_size());
                 let mut squeeze = vec![S::L::default(); squeeze_len];
                 self.sponge.squeeze_unchecked(&mut squeeze);
                 S::L::fill_bytes(&squeeze, output);

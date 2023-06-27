@@ -1,3 +1,5 @@
+use core::borrow::Borrow;
+
 use rand::{CryptoRng, RngCore};
 
 use super::{DefaultRng, InvalidTag, Merlin, Sponge, IOPattern};
@@ -78,9 +80,9 @@ impl<S: Sponge> TranscriptBuilder<S> {
 }
 
 
-impl<S: Sponge> From<&IOPattern> for Transcript<S> {
-    fn from(pattern: &IOPattern) -> Self {
-        TranscriptBuilder::new(&pattern)
+impl<S: Sponge, B: Borrow<IOPattern>> From<B> for Transcript<S> {
+    fn from(pattern: B) -> Self {
+        TranscriptBuilder::new(pattern.borrow())
             .finalize_with_rng(DefaultRng::default())
     }
 }

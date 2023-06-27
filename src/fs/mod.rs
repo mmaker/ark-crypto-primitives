@@ -34,8 +34,7 @@
 //!                 .squeeze(16)
 //!                 .into_merlin::<PoseidonSpongeNG<Fq>>();
 //!     // Absorb the statement.
-//!     merlin.absorb(&[g.x, g.y])?
-//!           .absorb(&[pk.x, pk.y])?
+//!     merlin.absorb_points(&[g, pk])?
 //!           .ratchet()?;
 //!     // The state can be exported
 //!     // and the proof can be verified inside another sponge.
