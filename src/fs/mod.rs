@@ -143,24 +143,30 @@
 //! [Merlin]: https://github.com/dalek-cryptography/merlin
 //! [`digest::Digest`]: https://docs.rs/digest/latest/digest/trait.Digest.html
 
-/// Prover's internal state.
-mod arthur;
 /// Support for legacy hash functions (SHA2).
 pub mod legacy;
 /// Extensions for arkworks types.
 pub mod plugins;
-/// Support for sponge functions.
-pub mod sponge;
-
-/// New implementation of the poseidon sponge function.
+/// Extension for arkworks sponge functions.
 pub mod poseidon_ng;
 
+/// API for building a sponge from a permutation function.
 mod duplex;
+/// Error types.
 mod errors;
-mod keccak;
+/// SHA3 sponge function.
+pub mod keccak;
+
+/// Basic units over which a sponge operates.
 mod lane;
-mod merlin;
+/// Support for sponge functions.
+mod sponge;
+/// SAFE API for sponge functions (with ratcheting).
 mod safe;
+/// Verifier transcript.
+mod merlin;
+/// Prover's internal state.
+mod arthur;
 
 pub use arthur::{Transcript, TranscriptBuilder};
 pub use duplex::{DuplexSponge, SpongeConfig};
