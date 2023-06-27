@@ -8,7 +8,6 @@ use ark_std::UniformRand;
 
 impl<F: Lane + PoseidonDefaultConfigField> SpongeConfig for PoseidonSponge<F> {
     type L = F;
-    const N: usize = 10;
 
     fn new() -> Self {
         let config = F::get_default_poseidon_parameters(10, false).unwrap();
@@ -35,8 +34,8 @@ pub type PoseidonSpongeNG<F> = DuplexSponge<PoseidonSponge<F>>;
 
 use super::lane::impl_lane;
 
-impl_lane!(ark_ed_on_bls12_381::Fq);
-impl_lane!(ark_ed_on_bls12_381::Fr);
+impl_lane!(ark_ed_on_bls12_381::Fq, 254);
+impl_lane!(ark_ed_on_bls12_381::Fr, 251);
 
 
 impl PoseidonDefaultConfigField for ark_ed_on_bls12_381::Fq {

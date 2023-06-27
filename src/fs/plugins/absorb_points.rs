@@ -1,4 +1,4 @@
-use crate::fs::{InvalidTag, Lane, Merlin, SpongeExt};
+use crate::fs::{InvalidTag, Lane, Merlin, Sponge};
 use ark_ec::AffineRepr;
 use ark_ff::Field;
 
@@ -12,7 +12,7 @@ pub trait AbsorbPoint {
 
 impl<S> AbsorbPoint for Merlin<S>
 where
-    S: SpongeExt,
+    S: Sponge,
     S::L: Field,
 {
     type F = S::L;

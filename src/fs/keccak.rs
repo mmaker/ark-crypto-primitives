@@ -2,10 +2,9 @@
 
 use core::ops::{Deref, DerefMut};
 
-use keccak;
 use zeroize::{Zeroize, ZeroizeOnDrop};
+use keccak::f1600 as keccak_f1600;
 
-use crate::fs::SpongeExt;
 
 use super::Sponge;
 
@@ -47,7 +46,7 @@ impl Sponge for Keccak {
     fn new() -> Self {
         let initial_state = {
             let mut st = AlignedKeccakState([0u8; 200]);
-            keccak::f1600(transmute_state(&mut st));
+            keccak_f1600(transmute_state(&mut st));
 
             st
         };
@@ -61,7 +60,7 @@ impl Sponge for Keccak {
         strobe
     }
 
-    fn absorb_unsafe(&mut self, input: &[Self::L]) -> &mut Self {
+    fn absorb_unchecked(&mut self, input: &[Self::L]) -> &mut Self {
         for byte in input {
             self.state[self.pos as usize] ^= byte;
             self.pos += 1;
@@ -72,7 +71,7 @@ impl Sponge for Keccak {
         self
     }
 
-    fn squeeze_unsafe(&mut self, output: &mut [Self::L]) -> &mut Self {
+    fn squeeze_unchecked(&mut self, output: &mut [Self::L]) -> &mut Self {
         for byte in output {
             *byte = self.state[self.pos as usize];
             self.state[self.pos as usize] = 0;
@@ -86,6 +85,18 @@ impl Sponge for Keccak {
 
     fn from_capacity(_input: &[Self::L]) -> Self {
         todo!()
+    }
+
+
+    fn export_unchecked(&self) -> Vec<Self::L> {
+        todo!()
+    }
+
+    fn ratchet_unchecked(&mut self) -> &mut Self {
+        self.run_f();
+        self.state[0..STROBE_R as usize].zeroize();
+        self.pos = 0;
+        self
     }
 }
 
@@ -114,25 +125,3 @@ impl DerefMut for AlignedKeccakState {
     }
 }
 
-impl SpongeExt for Keccak {
-    const N: usize = STROBE_R as usize;
-
-    fn absorb_bytes_unsafe(&mut self, input: &[u8]) {
-        self.absorb_unsafe(input);
-    }
-
-    fn squeeze_bytes_unsafe(&mut self, output: &mut [u8]) {
-        self.squeeze_unsafe(output);
-    }
-
-    fn export_unsafe(&self) -> Vec<Self::L> {
-        todo!()
-    }
-
-    fn ratchet_unsafe(&mut self) -> &mut Self {
-        self.run_f();
-        self.state[0..STROBE_R as usize].zeroize();
-        self.pos = 0;
-        self
-    }
-}

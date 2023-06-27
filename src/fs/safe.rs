@@ -1,8 +1,15 @@
 
-use super::{InvalidTag, Lane, Sponge, SpongeExt};
+use super::{InvalidTag, Lane, Sponge};
 use ark_std::collections::VecDeque;
 use ::core::cmp::Ordering;
 use ::core::num::NonZeroUsize;
+
+
+macro_rules! ceil {
+    ($a: expr, $b: expr) => {
+        ($a + $b - 1) / $b
+    };
+}
 
 /// Sponge operations.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -78,12 +85,12 @@ impl IOPattern {
 ///
 /// Operations in the SAFE API provide a secure interface for using sponges.
 #[derive(Clone)]
-pub struct Safe<S: SpongeExt> {
+pub struct Safe<S: Sponge> {
     sponge: S,
     stack: VecDeque<Op>,
 }
 
-impl<S: SpongeExt> Safe<S> {
+impl<S: Sponge> Safe<S> {
     fn parse_io(io_pattern: &IOPattern) -> Result<VecDeque<Op>, InvalidTag> {
         let mut stack = VecDeque::new();
 
@@ -160,8 +167,8 @@ impl<S: SpongeExt> Safe<S> {
         let mut sponge = S::new();
 
         // start off absorbing the tag information
-        sponge.absorb_unsafe(&S::L::pack_bytes(io_pattern.as_bytes()));
-        sponge.ratchet_unsafe();
+        sponge.absorb_unchecked(&S::L::pack_bytes(io_pattern.as_bytes()));
+        sponge.ratchet_unchecked();
         Self { sponge, stack }
     }
 
@@ -173,14 +180,14 @@ impl<S: SpongeExt> Safe<S> {
         if self.stack.pop_front().unwrap() != Op::Ratchet {
             Err("Invalid tag".into())
         } else {
-            self.sponge.ratchet_unsafe();
+            self.sponge.ratchet_unchecked();
             Ok(self)
         }
     }
 
     pub fn ratchet_and_export(mut self) -> Result<Vec<<S as Sponge>::L>, InvalidTag> {
         self.ratchet()?;
-        Ok(self.sponge.export_unsafe())
+        Ok(self.sponge.export_unchecked())
     }
 
     /// Perform secure absorption of the elements in `input`.
@@ -193,13 +200,33 @@ impl<S: SpongeExt> Safe<S> {
                     Err(format!("Not enough input for absorb: requested {}", input.len()).into())
                 }
                 Ordering::Equal => {
-                    self.sponge.absorb_unsafe(input);
+                    self.sponge.absorb_unchecked(input);
                     Ok(self)
                 }
                 Ordering::Greater => {
                     self.stack.push_front(Op::Absorb(length - input.len()));
-                    self.sponge.absorb_unsafe(input);
+                    self.sponge.absorb_unchecked(input);
                     Ok(self)
+                }
+            }
+        } else {
+            Err("Invalid tag".into())
+        }
+    }
+
+    pub fn squeeze_native(&mut self, output: &mut [S::L]) -> Result<(), InvalidTag> {
+        let op = self.stack.pop_front().unwrap();
+        if let Op::Squeeze(length) = op {
+            match length.cmp(&output.len()) {
+                Ordering::Greater => Err("Not enough output for squeeze".into()),
+                Ordering::Equal => {
+                    self.sponge.squeeze_unchecked(output);
+                    Ok(())
+                }
+                Ordering::Less => {
+                    self.stack.push_front(Op::Squeeze(length - output.len()));
+                    self.sponge.squeeze_unchecked(output);
+                    Ok(())
                 }
             }
         } else {
@@ -214,26 +241,21 @@ impl<S: SpongeExt> Safe<S> {
     /// This function provides no guarantee of streaming-friendliness.
     pub fn squeeze(&mut self, output: &mut [u8]) -> Result<(), InvalidTag> {
         let op = self.stack.pop_front().unwrap();
-        if let Op::Squeeze(length) = op {
-            match length.cmp(&output.len()) {
-                Ordering::Greater => Err("Not enough output for squeeze".into()),
-                Ordering::Equal => {
-                    self.sponge.squeeze_bytes_unsafe(output);
-                    Ok(())
-                }
-                Ordering::Less => {
-                    self.stack.push_front(Op::Squeeze(length - output.len()));
-                    self.sponge.squeeze_bytes_unsafe(output);
-                    Ok(())
-                }
+
+        match op {
+            Op::Squeeze(length)  => {
+                let squeeze_len = ceil!(length, S::L::random_byte_size());
+                let mut squeeze = vec![S::L::default(); squeeze_len];
+                self.sponge.squeeze_unchecked(&mut squeeze);
+                S::L::fill_bytes(&squeeze, output);
+                Ok(())
             }
-        } else {
-            Err("Invalid tag".into())
+            _ => Err("Invalid tag".into())
         }
     }
 }
 
-impl<S: SpongeExt> Drop for Safe<S> {
+impl<S: Sponge> Drop for Safe<S> {
         /// Destroyes the sponge state.
         fn drop(&mut self) {
             if !self.stack.is_empty() {

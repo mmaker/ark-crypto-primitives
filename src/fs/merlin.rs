@@ -1,11 +1,11 @@
-use super::{safe::IOPattern, InvalidTag, Safe, SpongeExt};
+use super::{safe::IOPattern, InvalidTag, Safe, Sponge};
 
 /// Merlin is wrapper around a sponge that provides a secure
 /// Fiat-Shamir implementation for public-coin protocols.
 #[derive(Clone)]
-pub struct Merlin<S: SpongeExt>(Safe<S>);
+pub struct Merlin<S: Sponge>(Safe<S>);
 
-impl<S: SpongeExt> Merlin<S> {
+impl<S: Sponge> Merlin<S> {
     pub fn new(io_pattern: &IOPattern) -> Self {
         let safe_sponge = Safe::new(io_pattern);
         Self(safe_sponge)
@@ -35,7 +35,7 @@ impl<S: SpongeExt> Merlin<S> {
 }
 
 
-impl<S: SpongeExt> From<&IOPattern> for Merlin<S> {
+impl<S: Sponge> From<&IOPattern> for Merlin<S> {
     fn from(io_pattern: &IOPattern) -> Self {
         Merlin::new(&io_pattern)
     }

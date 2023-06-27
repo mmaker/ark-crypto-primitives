@@ -12,7 +12,7 @@ use digest::Digest;
 use sha2;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use super::{Sponge, SpongeExt};
+use super::Sponge;
 
 #[derive(Clone)]
 pub struct Sha2Bridge {
@@ -84,7 +84,7 @@ impl Sponge for Sha2Bridge {
         sha2bridge
     }
 
-    fn absorb_unsafe(&mut self, input: &[Self::L]) -> &mut Self {
+    fn absorb_unchecked(&mut self, input: &[Self::L]) -> &mut Self {
         if let Mode::Ratcheted(count) = self.mode {
             self.mode = Mode::Absorb;
             // append to the state the squeeze mask
@@ -101,7 +101,20 @@ impl Sponge for Sha2Bridge {
         self
     }
 
-    fn squeeze_unsafe(&mut self, output: &mut [Self::L]) -> &mut Self {
+    fn ratchet_unchecked(&mut self) -> &mut Self {
+        if self.mode == Mode::Absorb {
+            let digest = self.hasher.finalize_reset();
+            self.cv.copy_from_slice(&digest)
+        }
+        self
+    }
+
+    fn export_unchecked(&self) -> Vec<u8> {
+        self.cv.to_vec()
+    }
+
+
+    fn squeeze_unchecked(&mut self, output: &mut [Self::L]) -> &mut Self {
         // Nothing to squeeze
         if output.is_empty() {
             self
@@ -113,14 +126,14 @@ impl Sponge for Sha2Bridge {
             self.leftovers[..len].copy_from_slice(&output[..len]);
             self.leftovers.drain(..len);
             // go back to the beginning
-            self.squeeze_unsafe(&mut output[len..])
+            self.squeeze_unchecked(&mut output[len..])
         }
         // If absorbing, change mode and set the state properly
         else if let Mode::Absorb = self.mode {
             self.mode = Mode::Ratcheted(0);
             self.cv.copy_from_slice(&self.hasher.finalize_reset());
             // go back to the beginning
-            self.squeeze_unsafe(output)
+            self.squeeze_unchecked(output)
         // Squeeze another digest
         } else if let Mode::Ratcheted(i) = self.mode {
             let len = usize::min(output.len(), Self::DIGEST_SIZE);
@@ -135,29 +148,10 @@ impl Sponge for Sha2Bridge {
             self.leftovers.extend_from_slice(&output[len..]);
             // update the state
             self.mode = Mode::Ratcheted(i + 1);
-            self.squeeze_unsafe(&mut output[len..])
+            self.squeeze_unchecked(&mut output[len..])
         } else {
             unreachable!()
         }
     }
 }
 
-impl SpongeExt for Sha2Bridge {
-    const N: usize = Self::DIGEST_SIZE;
-
-    fn squeeze_bytes_unsafe(&mut self, output: &mut [u8]) {
-        self.squeeze_unsafe(output);
-    }
-
-    fn ratchet_unsafe(&mut self) -> &mut Self {
-        if self.mode == Mode::Absorb {
-            let digest = self.hasher.finalize_reset();
-            self.cv.copy_from_slice(&digest)
-        }
-        self
-    }
-
-    fn export_unsafe(&self) -> Vec<u8> {
-        self.cv.to_vec()
-    }
-}

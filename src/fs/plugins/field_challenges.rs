@@ -1,4 +1,4 @@
-use crate::fs::{InvalidTag, Merlin, SpongeExt, Transcript};
+use crate::fs::{InvalidTag, Merlin, Sponge, Transcript};
 use ark_ff::PrimeField;
 use rand::{CryptoRng, RngCore};
 
@@ -6,13 +6,13 @@ pub trait FieldChallenges {
     fn get_field_challenge<F: PrimeField>(&mut self, byte_count: usize) -> Result<F, InvalidTag>;
 }
 
-impl<S: SpongeExt, R: RngCore + CryptoRng> FieldChallenges for Transcript<S, R> {
+impl<S: Sponge, R: RngCore + CryptoRng> FieldChallenges for Transcript<S, R> {
     fn get_field_challenge<F: PrimeField>(&mut self, byte_count: usize) -> Result<F, InvalidTag> {
         self.merlin.get_field_challenge(byte_count)
     }
 }
 
-impl<S: SpongeExt> FieldChallenges for Merlin<S> {
+impl<S: Sponge> FieldChallenges for Merlin<S> {
     /// Get a field element challenge from the protocol transcript.
     ///
     /// The number of random bytes used to generate the challenge is explicit:

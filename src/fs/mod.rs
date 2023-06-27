@@ -168,7 +168,7 @@ pub use errors::InvalidTag;
 pub use lane::Lane;
 pub use merlin::Merlin;
 pub use safe::{IOPattern, Safe};
-pub use sponge::{Sponge, SpongeExt};
+pub use sponge::Sponge;
 pub use duplex::{DuplexSponge, SpongeConfig};
 
 pub type DefaultRng = rand::rngs::OsRng;

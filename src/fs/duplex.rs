@@ -1,5 +1,5 @@
-use super::{Lane, Sponge, SpongeExt};
-use ark_ff::{BigInteger, PrimeField, Zero};
+use super::{Lane, Sponge};
+use ark_ff::PrimeField;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 
@@ -10,9 +10,8 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 /// and it permutes its internal state using `SpongeConfig::permute()`.
 ///
 /// From each squeeze, the operation, the least `N` bytes can are guaranteed to be indistinguihsable from random.
-pub trait SpongeConfig {
+pub trait SpongeConfig: Clone {
     type L: Lane;
-    const N: usize;
 
     fn new() -> Self;
     fn capacity(&self) -> usize;
@@ -21,6 +20,7 @@ pub trait SpongeConfig {
 }
 
 /// A cryptographic sponge.
+#[derive(Clone)]
 pub struct DuplexSponge<C: SpongeConfig> {
     config: C,
     state: Vec<C::L>,
@@ -44,8 +44,8 @@ impl<C: SpongeConfig> Drop for DuplexSponge<C> {
 
 impl<C: SpongeConfig> ZeroizeOnDrop for DuplexSponge<C> {}
 
-impl<L: Lane, C: SpongeConfig<L = L>> Sponge for DuplexSponge<C> {
-    type L = L;
+impl<F: PrimeField + Lane, C: SpongeConfig<L = F>> Sponge for DuplexSponge<C> {
+    type L = F;
 
     fn new() -> Self {
         let config = C::new();
@@ -58,7 +58,7 @@ impl<L: Lane, C: SpongeConfig<L = L>> Sponge for DuplexSponge<C> {
         }
     }
 
-    fn absorb_unsafe(&mut self, input: &[Self::L]) -> &mut Self {
+    fn absorb_unchecked(&mut self, input: &[Self::L]) -> &mut Self {
         if input.len() == 0 {
             self.squeeze_pos = self.config.rate();
             self
@@ -70,11 +70,11 @@ impl<L: Lane, C: SpongeConfig<L = L>> Sponge for DuplexSponge<C> {
             // XXX. maybe we should absorb in overwrite mode?
             self.state[self.absorb_pos] += input[0];
             self.absorb_pos += 1;
-            self.absorb_unsafe(&input[1..])
+            self.absorb_unchecked(&input[1..])
         }
     }
 
-    fn squeeze_unsafe(&mut self, output: &mut [Self::L]) -> &mut Self {
+    fn squeeze_unchecked(&mut self, output: &mut [Self::L]) -> &mut Self {
         if output.len() == 0 {
             return self;
         }
@@ -87,7 +87,7 @@ impl<L: Lane, C: SpongeConfig<L = L>> Sponge for DuplexSponge<C> {
 
         output[0] = self.state[self.squeeze_pos];
         self.squeeze_pos += 1;
-        self.squeeze_unsafe(&mut output[1..])
+        self.squeeze_unchecked(&mut output[1..])
     }
 
     fn from_capacity(input: &[Self::L]) -> Self {
@@ -96,31 +96,14 @@ impl<L: Lane, C: SpongeConfig<L = L>> Sponge for DuplexSponge<C> {
         sponge.state[sponge.config.rate()..].copy_from_slice(input);
         sponge
     }
-}
 
-impl<F: Lane + PrimeField, C: SpongeConfig<L = F>> SpongeExt for DuplexSponge<C> {
-    const N: usize = C::N;
 
-    fn squeeze_bytes_unsafe(&mut self, output: &mut [u8]) {
-        // obtained with the above function
-        let n = 251 / 8;
-        let len = (output.len() + n - 1) / n;
-        let mut buf = vec![Self::L::zero(); len];
-        self.squeeze_unsafe(buf.as_mut_slice());
-        for i in 0..len - 1 {
-            output[i * n..(i + 1) * n].copy_from_slice(&buf[i].into_bigint().to_bytes_le()[..n]);
-        }
-        let remainder = output.len() % n;
-        output[n * (len - 1)..]
-            .copy_from_slice(&buf[len - 1].into_bigint().to_bytes_le()[..remainder]);
-    }
-
-    fn export_unsafe(&self) -> Vec<Self::L> {
+    fn export_unchecked(&self) -> Vec<Self::L> {
         // XXX. double-check this
         self.state.to_vec()
     }
 
-    fn ratchet_unsafe(&mut self) -> &mut Self {
+    fn ratchet_unchecked(&mut self) -> &mut Self {
         self.config.permute(self.state.as_mut_slice());
         // set to zero the state up to rate
         self.state[..self.config.rate()]
@@ -129,3 +112,4 @@ impl<F: Lane + PrimeField, C: SpongeConfig<L = F>> SpongeExt for DuplexSponge<C>
         self
     }
 }
+

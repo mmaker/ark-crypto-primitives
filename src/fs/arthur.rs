@@ -1,6 +1,6 @@
 use rand::{CryptoRng, RngCore};
 
-use super::{DefaultRng, InvalidTag, Merlin, SpongeExt, IOPattern, Sponge};
+use super::{DefaultRng, InvalidTag, Merlin, Sponge, IOPattern};
 use super::keccak::Keccak;
 
 // Arthur is a cryptographically-secure random number generator that is
@@ -25,31 +25,31 @@ impl<R: RngCore + CryptoRng> RngCore for Arthur<R> {
 
     fn fill_bytes(&mut self, dest: &mut [u8]) {
         self.csrng.fill_bytes(dest);
-        self.sponge.absorb_unsafe(dest);
-        self.sponge.squeeze_unsafe(dest);
+        self.sponge.absorb_unchecked(dest);
+        self.sponge.squeeze_unchecked(dest);
     }
 
     fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), ark_std::rand::Error> {
-        self.sponge.squeeze_unsafe(dest);
+        self.sponge.squeeze_unchecked(dest);
         Ok(())
     }
 }
 
 /// Builder for the prover state.
-pub struct TranscriptBuilder<S: SpongeExt>
+pub struct TranscriptBuilder<S: Sponge>
 where
-    S: SpongeExt,
+    S: Sponge,
 {
     merlin: Merlin<S>,
     u8sponge: Keccak,
 }
 
-impl<S: SpongeExt> TranscriptBuilder<S> {
+impl<S: Sponge> TranscriptBuilder<S> {
     pub(crate) fn new(io_pattern: &IOPattern) -> Self {
         let merlin = Merlin::new(io_pattern);
 
         let mut u8sponge = Keccak::new();
-        u8sponge.absorb_bytes_unsafe(io_pattern.as_bytes());
+        u8sponge.absorb_unchecked(io_pattern.as_bytes());
 
         Self { u8sponge, merlin }
     }
@@ -57,8 +57,8 @@ impl<S: SpongeExt> TranscriptBuilder<S> {
     // rekey the private sponge with some additional secrets (i.e. with the witness)
     // and ratchet
     pub fn rekey(mut self, data: &[u8]) -> Self {
-        self.u8sponge.absorb_unsafe(data);
-        self.u8sponge.ratchet_unsafe();
+        self.u8sponge.absorb_unchecked(data);
+        self.u8sponge.ratchet_unchecked();
         self
     }
 
@@ -78,7 +78,7 @@ impl<S: SpongeExt> TranscriptBuilder<S> {
 }
 
 
-impl<S: SpongeExt> From<&IOPattern> for Transcript<S> {
+impl<S: Sponge> From<&IOPattern> for Transcript<S> {
     fn from(pattern: &IOPattern) -> Self {
         TranscriptBuilder::new(&pattern)
             .finalize_with_rng(DefaultRng::default())
@@ -89,7 +89,7 @@ impl<S: SpongeExt> From<&IOPattern> for Transcript<S> {
 /// Holds the state of the verifier, and provides the random coins for the prover.
 pub struct Transcript<S, R = DefaultRng>
 where
-    S: SpongeExt,
+    S: Sponge,
     R: RngCore + CryptoRng,
 {
     /// The randomness state of the prover.
@@ -97,7 +97,7 @@ where
     pub(crate) merlin: Merlin<S>,
 }
 
-impl<S: SpongeExt, R: RngCore + CryptoRng> Transcript<S, R> {
+impl<S: Sponge, R: RngCore + CryptoRng> Transcript<S, R> {
     #[inline]
     pub fn absorb(&mut self, input: &[S::L]) -> Result<&mut Self, InvalidTag> {
         self.merlin.absorb(input)?;
@@ -107,7 +107,7 @@ impl<S: SpongeExt, R: RngCore + CryptoRng> Transcript<S, R> {
     /// Get a challenge of `count` bytes.
     pub fn challenge_bytes(&mut self, dest: &mut [u8]) -> Result<(), InvalidTag> {
         self.merlin.challenge_bytes(dest)?;
-        self.arthur.sponge.absorb_unsafe(dest);
+        self.arthur.sponge.absorb_unchecked(dest);
         Ok(())
     }
 
