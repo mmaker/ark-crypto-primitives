@@ -17,7 +17,6 @@ pub trait Sponge: Clone + Zeroize + ZeroizeOnDrop {
     /// Provides access to the internal state of the sponge.
     fn from_capacity(input: &[Self::L]) -> Self;
 
-
     /// Ratcheting.
     ///
     /// This operation consists in:
@@ -52,4 +51,3 @@ pub trait Sponge: Clone + Zeroize + ZeroizeOnDrop {
 //         if n+1 + p.bit_length() - alpha.bit_length() - (2^n-alpha).bit_length() >= 128:
 //             return n
 // ```
-

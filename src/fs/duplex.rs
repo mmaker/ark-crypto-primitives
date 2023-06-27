@@ -2,7 +2,6 @@ use super::{Lane, Sponge};
 use ark_ff::PrimeField;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-
 /// The basic configuration of a cryptographic sponge.
 ///
 /// A cryptographic sponge operates over some domain `SpongeConfig::L` of lanes.
@@ -97,7 +96,6 @@ impl<F: PrimeField + Lane, C: SpongeConfig<L = F>> Sponge for DuplexSponge<C> {
         sponge
     }
 
-
     fn export_unchecked(&self) -> Vec<Self::L> {
         // XXX. double-check this
         self.state.to_vec()
@@ -112,4 +110,3 @@ impl<F: PrimeField + Lane, C: SpongeConfig<L = F>> Sponge for DuplexSponge<C> {
         self
     }
 }
-

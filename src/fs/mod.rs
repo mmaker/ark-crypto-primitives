@@ -162,13 +162,13 @@ mod lane;
 mod merlin;
 mod safe;
 
-pub use arthur::{TranscriptBuilder, Transcript};
+pub use arthur::{Transcript, TranscriptBuilder};
+pub use duplex::{DuplexSponge, SpongeConfig};
 pub use errors::InvalidTag;
 pub use lane::Lane;
 pub use merlin::Merlin;
 pub use safe::{IOPattern, Safe};
 pub use sponge::Sponge;
-pub use duplex::{DuplexSponge, SpongeConfig};
 
 pub type DefaultRng = rand::rngs::OsRng;
 pub type DefaultHash = keccak::Keccak;

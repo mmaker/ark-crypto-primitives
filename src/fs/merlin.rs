@@ -35,9 +35,14 @@ impl<S: Sponge> Merlin<S> {
     // }
 }
 
-
 impl<S: Sponge, B: Borrow<IOPattern>> From<B> for Merlin<S> {
     fn from(io_pattern: B) -> Self {
         Merlin::new(io_pattern.borrow())
+    }
+}
+
+impl<S: Sponge> ::core::fmt::Debug for Merlin<S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_tuple("Merlin").field(&self.0).finish()
     }
 }

@@ -1,16 +1,18 @@
-use crate::fs::{InvalidTag, Lane, Merlin, Sponge, Transcript};
+use crate::fs::{plugins::AbsorbSerializable, InvalidTag, Merlin, Sponge, Transcript};
 use ark_ec::AffineRepr;
 use ark_ff::Field;
 use rand::{RngCore, CryptoRng};
 
-pub trait AbsorbPoint {
+pub trait AbsorbPoint: AbsorbSerializable {
     type F;
+
     fn absorb_points<A: AffineRepr<BaseField = Self::F>>(
         &mut self,
         input: &[A],
-    ) -> Result<&mut Self, InvalidTag>;
+    ) -> Result<&mut Self, InvalidTag> {
+        self.absorb_serializable(input)
+    }
 }
-
 
 impl<S> AbsorbPoint for Merlin<S>
 where
@@ -22,21 +24,21 @@ where
     where
         A: AffineRepr<BaseField = S::L>,
     {
-        let mut buf = Vec::new();
-        for point in input {
-            point.serialize_uncompressed(&mut buf).unwrap();
-        }
-        self.absorb(S::L::pack_bytes(&buf).as_slice())
+        let input = input.iter().map(|point| {
+            let (x, y) = point.xy().expect("Non-zero");
+            [*x, *y]
+        }).flatten().collect::<Vec<_>>();
+        self.absorb(input.as_slice())?;
+        Ok(self)
     }
 }
 
 impl<S, R> AbsorbPoint for Transcript<S, R>
 where
-    S: Sponge,
-    S::L: Field,
-    R: RngCore + CryptoRng,
-{
-    type F = S::L;
+S: Sponge,
+R: RngCore + CryptoRng,
+S::L: Field {
+    type F =S::L;
 
     fn absorb_points<A: AffineRepr<BaseField = Self::F>>(
             &mut self,

@@ -1,19 +1,11 @@
-
 use super::{InvalidTag, Lane, Sponge};
-use ark_std::collections::VecDeque;
 use ::core::cmp::Ordering;
+use ark_std::collections::VecDeque;
 
 // XXX. before, absorb and squeeze were accepting arguments of type
 // use ::core::num::NonZeroUsize;
 // which was imposing a bit of a burden on the user side into casting the type.
 // (plain integers don't cast to NonZeroUsize automatically)
-
-
-macro_rules! ceil {
-    ($a: expr, $b: expr) => {
-        ($a + $b - 1) / $b
-    };
-}
 
 /// Sponge operations.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -50,15 +42,14 @@ impl Op {
             _ => Err("Invalid tag".into()),
         }
     }
-
 }
-
 
 /// A builder for tag strings to be used within the SAFE API,
 /// to construct the verifier transcript.
+#[derive(Clone)]
 pub struct IOPattern(String);
 
-const SEP_BYTE : u8 = b'\x00';
+const SEP_BYTE: u8 = b'\x00';
 
 impl IOPattern {
     pub fn new(domsep: &str) -> Self {
@@ -88,7 +79,6 @@ impl IOPattern {
     }
 }
 
-
 /// A (slightly modified) SAFE API for sponge functions.
 ///
 /// Operations in the SAFE API provide a secure interface for using sponges.
@@ -102,14 +92,15 @@ impl<S: Sponge> Safe<S> {
     fn parse_io(io_pattern: &IOPattern) -> Result<VecDeque<Op>, InvalidTag> {
         let mut stack = VecDeque::new();
 
-        // remove the domain separator.
+        // skip the domain separator.
         let mut index = 0;
         for (i, &b) in io_pattern.as_bytes().iter().enumerate() {
             if b == SEP_BYTE {
                 index = i;
             }
         }
-        let io_pattern = &io_pattern.as_bytes()[index..];
+        // XXX. can we make this panic? Instead return InvalidTag.
+        let io_pattern = &io_pattern.as_bytes()[index + 1..];
 
         let mut i: usize = 0;
         while i != io_pattern.len() {
@@ -170,8 +161,8 @@ impl<S: Sponge> Safe<S> {
     /// setting up the state of the sponge function and parsing the tag string.
     pub fn new(io_pattern: &IOPattern) -> Self {
         // Guaranteed to succeed as IOPattern is always a valid tag.
-        let stack = Self::parse_io(io_pattern)
-            .expect("Internal error. Please submit issue to m@orru.net");
+        let stack =
+            Self::parse_io(io_pattern).expect("Internal error. Please submit issue to m@orru.net");
         let mut sponge = S::new();
 
         // start off absorbing the tag information
@@ -201,7 +192,10 @@ impl<S: Sponge> Safe<S> {
     /// Perform secure absorption of the elements in `input`.
     /// Absorb calls can be batched together, or provided separately for streaming-friendly protocols.
     pub fn absorb(&mut self, input: &[S::L]) -> Result<&mut Self, InvalidTag> {
-        let op = self.stack.pop_front().ok_or::<InvalidTag>("Stack is already empty".into())?;
+        let op = self
+            .stack
+            .pop_front()
+            .ok_or::<InvalidTag>("Stack is already empty".into())?;
         if let Op::Absorb(length) = op {
             match length.cmp(&input.len()) {
                 Ordering::Less => {
@@ -251,24 +245,32 @@ impl<S: Sponge> Safe<S> {
         let op = self.stack.pop_front().unwrap();
 
         match op {
-            Op::Squeeze(length)  => {
-                let squeeze_len = ceil!(length, S::L::random_bytes_size());
+            Op::Squeeze(length) => {
+                let squeeze_len =
+                    (length + S::L::random_bytes_size() - 1) / S::L::random_bytes_size();
                 let mut squeeze = vec![S::L::default(); squeeze_len];
                 self.sponge.squeeze_unchecked(&mut squeeze);
                 S::L::fill_bytes(&squeeze, output);
                 Ok(())
             }
-            _ => Err("Invalid tag".into())
+            _ => Err("Invalid tag".into()),
         }
     }
 }
 
 impl<S: Sponge> Drop for Safe<S> {
-        /// Destroyes the sponge state.
-        fn drop(&mut self) {
-            if !self.stack.is_empty() {
-                panic!("Invalid tag. Remaining operations: {:?}", self.stack);
-            }
-            self.sponge.zeroize();
+    /// Destroyes the sponge state.
+    fn drop(&mut self) {
+        if !self.stack.is_empty() {
+            panic!("Invalid tag. Remaining operations: {:?}", self.stack);
         }
+        self.sponge.zeroize();
+    }
+}
+
+impl<S: Sponge> ::core::fmt::Debug for Safe<S> {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        // Ensure that the state isn't accidentally logged
+        write!(f, "SAFE sponge with IO: {:?}", self.stack)
+    }
 }

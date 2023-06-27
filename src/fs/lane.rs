@@ -5,13 +5,18 @@ use zeroize::Zeroize;
 /// We need only two things from a lane: the ability to convert it to bytes and back.
 pub trait Lane: AddAssign + Copy + Default + Sized + Zeroize {
     fn random_bytes_size() -> usize;
+    fn packed_size() -> usize;
+
     fn fill_bytes(a: &[Self], dst: &mut [u8]);
     fn pack_bytes(bytes: &[u8]) -> Vec<Self>;
 }
 
 impl Lane for u8 {
-
     fn random_bytes_size() -> usize {
+        1
+    }
+
+    fn packed_size() -> usize {
         1
     }
 
@@ -27,9 +32,14 @@ impl Lane for u8 {
 macro_rules! impl_lane {
     ($t:ty, $n: expr) => {
         impl Lane for $t {
-
             fn random_bytes_size() -> usize {
                 $n
+            }
+
+            fn packed_size() -> usize {
+                use ark_ff::PrimeField;
+
+                (Self::MODULUS_BIT_SIZE as usize - 1) / 8
             }
 
             fn fill_bytes(a: &[Self], dst: &mut [u8]) {
@@ -45,11 +55,10 @@ macro_rules! impl_lane {
             }
 
             fn pack_bytes(bytes: &[u8]) -> Vec<Self> {
-                use ark_ff::{PrimeField, Field};
+                use ark_ff::Field;
 
-                let n = (Self::MODULUS_BIT_SIZE as usize -1) / 8;
                 let mut packed = Vec::new();
-                for chunk in bytes.chunks(n) {
+                for chunk in bytes.chunks(Self::packed_size()) {
                     packed.push(Self::from_random_bytes(chunk).unwrap());
                 }
                 packed

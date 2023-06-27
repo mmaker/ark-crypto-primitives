@@ -6,6 +6,7 @@
     rust_2018_idioms,
     // missing_docs
 )]
+#![feature(int_roundings)]
 // #![forbid(unsafe_code)]
 
 #[macro_use]

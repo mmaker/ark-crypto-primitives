@@ -1,4 +1,4 @@
-use super::{DuplexSponge, SpongeConfig, Lane};
+use super::{DuplexSponge, Lane, SpongeConfig};
 use crate::sponge::{
     poseidon::{PoseidonConfig, PoseidonDefaultConfigField, PoseidonSponge},
     CryptographicSponge,
@@ -31,12 +31,10 @@ impl<F: Lane + PoseidonDefaultConfigField> SpongeConfig for PoseidonSponge<F> {
 
 pub type PoseidonSpongeNG<F> = DuplexSponge<PoseidonSponge<F>>;
 
-
 use super::lane::impl_lane;
 
 impl_lane!(ark_ed_on_bls12_381::Fq, 254);
 impl_lane!(ark_ed_on_bls12_381::Fr, 251);
-
 
 impl PoseidonDefaultConfigField for ark_ed_on_bls12_381::Fq {
     fn get_default_poseidon_parameters(

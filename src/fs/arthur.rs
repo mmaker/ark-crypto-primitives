@@ -2,8 +2,8 @@ use core::borrow::Borrow;
 
 use rand::{CryptoRng, RngCore};
 
-use super::{DefaultRng, InvalidTag, Merlin, Sponge, IOPattern};
 use super::keccak::Keccak;
+use super::{DefaultRng, IOPattern, InvalidTag, Merlin, Sponge};
 
 // Arthur is a cryptographically-secure random number generator that is
 // seeded by a random-number generator and is bound to the protocol transcript.
@@ -79,11 +79,9 @@ impl<S: Sponge> TranscriptBuilder<S> {
     }
 }
 
-
 impl<S: Sponge, B: Borrow<IOPattern>> From<B> for Transcript<S> {
     fn from(pattern: B) -> Self {
-        TranscriptBuilder::new(pattern.borrow())
-            .finalize_with_rng(DefaultRng::default())
+        TranscriptBuilder::new(pattern.borrow()).finalize_with_rng(DefaultRng::default())
     }
 }
 
@@ -127,3 +125,8 @@ impl<S: Sponge, R: RngCore + CryptoRng> Transcript<S, R> {
 
 impl<R: RngCore + CryptoRng> CryptoRng for Arthur<R> {}
 
+impl<S: Sponge, R: RngCore + CryptoRng> ::core::fmt::Debug for Transcript<S, R> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        self.merlin.fmt(f)
+    }
+}

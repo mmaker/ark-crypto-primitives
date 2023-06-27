@@ -113,7 +113,6 @@ impl Sponge for Sha2Bridge {
         self.cv.to_vec()
     }
 
-
     fn squeeze_unchecked(&mut self, output: &mut [Self::L]) -> &mut Self {
         // Nothing to squeeze
         if output.is_empty() {
@@ -154,4 +153,3 @@ impl Sponge for Sha2Bridge {
         }
     }
 }
-

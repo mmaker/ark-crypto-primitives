@@ -2,9 +2,8 @@
 
 use core::ops::{Deref, DerefMut};
 
-use zeroize::{Zeroize, ZeroizeOnDrop};
 use keccak::f1600 as keccak_f1600;
-
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use super::Sponge;
 
@@ -33,13 +32,6 @@ pub struct Keccak {
     cur_flags: u8,
 }
 
-impl ::core::fmt::Debug for Keccak {
-    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-        // Ensure that the Strobe state isn't accidentally logged
-        write!(f, "Keccak: STATE OMITTED")
-    }
-}
-
 impl Sponge for Keccak {
     type L = u8;
 
@@ -47,7 +39,6 @@ impl Sponge for Keccak {
         let initial_state = {
             let mut st = AlignedKeccakState([0u8; 200]);
             keccak_f1600(transmute_state(&mut st));
-
             st
         };
 
@@ -87,7 +78,6 @@ impl Sponge for Keccak {
         todo!()
     }
 
-
     fn export_unchecked(&self) -> Vec<Self::L> {
         todo!()
     }
@@ -124,4 +114,3 @@ impl DerefMut for AlignedKeccakState {
         &mut self.0
     }
 }
-

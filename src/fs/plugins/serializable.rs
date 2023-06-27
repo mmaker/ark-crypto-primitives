@@ -1,9 +1,7 @@
 use ark_serialize::CanonicalSerialize;
 use ark_std::rand::{CryptoRng, RngCore};
 
-use super::{InvalidTag, Lane, Transcript, TranscriptBuilder};
-use super::{IOPattern, Merlin, SpongeExt};
-
+use super::super::{IOPattern, InvalidTag, Lane, Merlin, Sponge, Transcript, TranscriptBuilder};
 
 pub trait AbsorbSerializable {
     fn absorb_serializable<S: CanonicalSerialize>(
@@ -11,9 +9,6 @@ pub trait AbsorbSerializable {
         input: S,
     ) -> Result<&mut Self, InvalidTag>;
 }
-
-
-
 
 pub trait RekeySerializable {
     fn rekey_serializable<S: CanonicalSerialize>(self, input: S) -> Self;
@@ -29,7 +24,7 @@ impl IOPatternExt for IOPattern {
     }
 }
 
-impl<S: SpongeExt> AbsorbSerializable for Merlin<S> {
+impl<S: Sponge> AbsorbSerializable for Merlin<S> {
     fn absorb_serializable<CS: CanonicalSerialize>(
         &mut self,
         input: CS,
@@ -42,8 +37,8 @@ impl<S: SpongeExt> AbsorbSerializable for Merlin<S> {
     }
 }
 
-impl<S: SpongeExt, FS: SpongeExt<L = u8>, R: RngCore + CryptoRng> AbsorbSerializable
-    for Transcript<S, R, FS>
+impl<S: Sponge, R: RngCore + CryptoRng> AbsorbSerializable
+    for Transcript<S, R>
 {
     fn absorb_serializable<CS: CanonicalSerialize>(
         &mut self,
@@ -54,14 +49,10 @@ impl<S: SpongeExt, FS: SpongeExt<L = u8>, R: RngCore + CryptoRng> AbsorbSerializ
     }
 }
 
-
-
-impl<S: SpongeExt, FS: SpongeExt<L = u8>> RekeySerializable for TranscriptBuilder<S, FS> {
+impl<S: Sponge> RekeySerializable for TranscriptBuilder<S> {
     fn rekey_serializable<CS: CanonicalSerialize>(self, input: CS) -> Self {
         let mut writer = Vec::new();
         input.serialize_compressed(&mut writer).unwrap();
         self.rekey(writer.as_slice())
     }
 }
-
-
